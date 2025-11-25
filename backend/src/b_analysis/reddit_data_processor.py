@@ -107,13 +107,13 @@ class RedditDataProcessor:
 
         for text in df["cleaned_text"]:
             result = self.extractor.extract_tickers(text)
-            tks = result["tickers"]
-            scs = result["scores"]
+            tks, scs = self.extractor.extract_tickers(text)
 
-            # force float conversion (safe)
+
+            # force float conversion.
             scs = [float(s) if (s is not None and s != "") else 0.0 for s in scs]
 
-            # now safe to boost
+            # now safe to boost.
             tks, scs = self.entity_linker.boost_confidences(text, tks, scs)
 
 

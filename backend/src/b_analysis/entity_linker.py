@@ -21,6 +21,11 @@ not a primary detection role.
 
 import logging
 from typing import Dict, Tuple, List
+from src.utils.config import (
+    MACRO_TERMS,
+    WSB_SLANG,
+    CONTEXT_REQUIRED_TICKERS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,7 @@ class EntityLinker:
             'META': ['meta', 'facebook', 'instagram', 'whatsapp', 'zuckerberg'],
             'GOOGL': ['google', 'alphabet', 'chrome', 'gmail', 'android'],
             'TSLA': ['tesla', 'elon', 'musk', 'model', 'gigafactory'],
+            'AI': ['c3.ai', 'c3ai', 'enterprise ai', 'enterprise-ai'],
         }
 
     # ==================================================================
@@ -85,14 +91,21 @@ class EntityLinker:
         # 2. Blacklist = invalid
         if ticker in self.common_word_blacklist:
             return False, 0.0
+        if ticker in MACRO_TERMS or ticker in WSB_SLANG:
+            return False, 0.0
 
-        # 3. Alias/company name match
+        # 3. Context-required tickers (AI, GDP, etc.)
+        if ticker in CONTEXT_REQUIRED_TICKERS:
+            if not self.has_alias_context(text_low, ticker):
+                return False, 0.0
+
+        # 4. Alias/company name match
         if ticker in self.aliases:
             for alias in self.aliases[ticker]:
                 if alias in text_low:
                     return True, 0.9
 
-        # 4. Literal ticker mention ($TSLA or TSLA in text)
+        # 5. Literal ticker mention ($TSLA or TSLA in text)
         if ticker.lower() in text_low:
             return True, 0.6
 
@@ -142,3 +155,16 @@ class EntityLinker:
             boosted.append(new_score)
 
         return tickers, boosted
+
+    # ==================================================================
+    # Helpers
+    # ==================================================================
+    def has_alias_context(self, text_low: str, ticker: str) -> bool:
+        """
+        Require supporting company keywords for ambiguous tickers
+        like AI, GDP, VAT, etc.
+        """
+        for alias in self.aliases.get(ticker, []):
+            if alias in text_low:
+                return True
+        return False

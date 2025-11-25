@@ -34,6 +34,7 @@ TEST_SORT_METHODS = ['new']
 # - test: 1 subreddit × 1 sort × 10 posts = 10 posts
 # - with additional subs: 10 subreddits × 3 sorts × 100 posts = up to 3,000 posts
 
+
 # ============================================================================
 # stage 2: ticker analysis config
 # ============================================================================
@@ -42,6 +43,49 @@ TEST_SORT_METHODS = ['new']
 TICKERS = ['NVDA', 'NVIDIA', 'AMD', 'INTC', 'TSMC']
 MAX_TEXT_LENGTH = 500
 SUMMARY_LENGTH = 100
+
+# noise filters for ticker extraction
+MACRO_TERMS = {
+    'GDP', 'CPI', 'PPI', 'FOMC', 'FED', 'YCC', 'VAT', 'RATE', 'TAX',
+    'INFLATION', 'YIELD', 'TREASURY', 'JOBS', 'ENERGY', 'OPEC', 'ECB',
+    'WWII', 'AI', 'TL', 'DR'
+}
+
+WSB_SLANG = {
+    'DD', 'YOLO', 'IV', 'TA', 'FA', 'ATH', 'OTM', 'ITM', 'RH', 'FOMO',
+    'FD', 'STONK', 'GANG', 'MOASS', 'HF', 'BAG', 'PUMP', 'DUMP'
+}
+
+CONTEXT_REQUIRED_TICKERS = {
+    'AI', 'GDP', 'VAT', 'YCC', 'TL', 'DR'
+}
+
+# comprehensive blacklist covering slang, macro terms, finance acronyms, TA words
+WSB_FINANCE_BLACKLIST = {
+    "A", "AHH", "AI", "ALL", "AND", "ANY", "ARE",
+    "ATH", "ATM", "BREAK", "BREAKOUT", "BULL", "BUT",
+    "CALL", "CALLS", "CAN", "CAGR", "CHEAP", "CPI", "CPU",
+    "COULD", "DD", "DELTA", "DIAMOND", "DUMP", "DCF",
+    "DO", "DOWN", "EBITDA", "EMA", "EPS", "ETFS",
+    "ETF", "EV", "EU", "FIB", "FED", "FCF", "FOMO",
+    "FOMU", "FUD", "GAIN", "GAINZ", "GAMMA", "GDP",
+    "GG", "GO", "GREEN", "GPU", "HODL", "HIGH",
+    "HOW", "HUGE", "IMF", "IN", "IRS", "ITM",
+    "IV", "IVR", "JOB", "LEFT", "LEAP", "LEAPS",
+    "LOSS", "LMAO", "LOL", "LOW", "MACD", "MAY",
+    "ML", "MOASS", "MUST", "NAV", "NEXT", "NOT",
+    "NOW", "ON", "ONE", "OTM", "OUT", "OI", "P",
+    "PAT", "PBT", "PE", "PCE", "PIVOT", "PUMP",
+    "PUT", "PUTS", "QOQ", "QE", "QT", "RED",
+    "RESISTANCE", "RETURN", "RIGHT", "ROA",
+    "ROE", "ROI", "RSI", "SAFE", "SCALP",
+    "SEC", "SHOULD", "SHORT", "SMA", "STONKS",
+    "STRIKE", "SUPPORT", "S", "T", "TENDIES",
+    "THE", "THEY", "THEM", "THAT", "THIS",
+    "THETA", "TLDR", "TPU", "TREND", "TWO",
+    "UP", "VWAP", "WAS", "WILL", "WHAT", "WHY",
+    "WTF", "YOLO", "YOY", "YCC"
+}
 
 # subreddit to ticker mapping (all lowercase keys)
 SUBREDDIT_TICKERS = {

@@ -1,21 +1,13 @@
 # src/b_analysis/ticker_extractor.py
 
-"""
-TickerExtractor
----------------
-Single source of truth for:
-    - Regex-based ticker extraction
-    - Filtering invalid/common/ambiguous words
-    - EntityLinker validation
-    - Confidence scoring
-
-Used by:
-    - reddit_data_processor
-    - topic_identifier
-"""
-
 import re
-from typing import Dict, List, Any
+from typing import List, Tuple
+from src.utils.config import (
+    MACRO_TERMS,
+    WSB_SLANG,
+    WSB_FINANCE_BLACKLIST,
+    CONTEXT_REQUIRED_TICKERS,
+)
 from .entity_linker import EntityLinker
 
 
@@ -29,20 +21,17 @@ class TickerExtractor:
         self.entity_linker = EntityLinker()
 
     # ------------------------------------------------------------------
-    def extract_tickers(self, text: str) -> Dict[str, Any]:
+    def extract_tickers(self, text: str) -> Tuple[List[str], List[float]]:
         """
-        Extract and validate tickers from raw post/comment text.
-        Returns a dict:
+        Extract and validate tickers from text.
 
-            {
-                "tickers": ["NVDA", "AAPL"],
-                "scores": {"NVDA": 0.9, "AAPL": 0.5},
-                "debug": {...}
-            }
+        RETURNS:
+            tickers: ["NVDA", "AAPL"]
+            scores:  [0.9, 0.5]    <-- aligned with tickers
         """
 
         if not text:
-            return {"tickers": [], "scores": {}, "debug": {}}
+            return [], []
 
         tickers = set()
 
@@ -55,20 +44,35 @@ class TickerExtractor:
             tickers.add(match.upper())
 
         validated = []
-        scores = {}
+        scores = []
 
-        # ---------- 3. Validate via EntityLinker ----------
-        for ticker in sorted(tickers):
-            is_valid, confidence = self.entity_linker.validate(text, ticker)
+        # ---------- 3. Validate via Minimal EntityLinker ----------
+        filtered = self._filter_noise_tickers(sorted(tickers), text)
+
+        for ticker in filtered:
+            is_valid, conf = self.entity_linker.validate(text, ticker)
             if is_valid:
                 validated.append(ticker)
-                scores[ticker] = confidence
+                scores.append(float(conf))  # ensure numeric
 
-        return {
-            "tickers": validated,
-            "scores": scores,
-            "debug": {
-                "raw_matches": list(tickers),
-                "validated": validated,
-            }
-        }
+        return validated, scores
+
+    # ------------------------------------------------------------------
+    def _filter_noise_tickers(self, tickers: List[str], text: str) -> List[str]:
+        """Drop macro terms / slang / context-free uppercase words."""
+        clean = []
+        text_low = text.lower() if text else ""
+
+        for ticker in tickers:
+            if ticker in MACRO_TERMS:
+                continue
+            if ticker in WSB_SLANG:
+                continue
+            if ticker in WSB_FINANCE_BLACKLIST:
+                continue
+            if ticker in CONTEXT_REQUIRED_TICKERS:
+                # only keep if company alias context exists
+                if not self.entity_linker.has_alias_context(text_low, ticker):
+                    continue
+            clean.append(ticker)
+        return clean
