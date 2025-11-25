@@ -10,22 +10,24 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-from textblob import TextBlob
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
 from src.utils.path_config import (
     RAW_DIR, 
     PROCESSED_DIR, 
     DEBUG_DIR, 
     TICKER_SENTIMENT_DIR
 )
-from src.analysis.topic_identifier import POTENTIALLY_AMBIGUOUS_TICKERS  # Added import
 from typing import Tuple, List, Set
 from colorama import Fore, Style, init
 from tqdm import tqdm
 import time
-from src.analysis.entity_linker import EntityLinker
+from .topic_identifier import POTENTIALLY_AMBIGUOUS_TICKERS
+from .entity_linker import EntityLinker
+from src.utils.config import (
+    TICKERS, MAX_TEXT_LENGTH, SUMMARY_LENGTH, SUBREDDIT_TICKERS,
+    STRONG_FINANCE_WORDS, WEAK_FINANCE_WORDS, COMMON_WORDS,
+    ETF_CATEGORIES, VALID_ETFS, WELL_KNOWN_TICKERS,
+    NEGATIVE_CONTEXT_PATTERNS, AMBIGUOUS_FINANCIAL_TICKERS
+)
 import json
 from contextlib import nullcontext
 from collections import defaultdict
@@ -36,60 +38,15 @@ init()
 # Setup Logging.
 logger = logging.getLogger(__name__)
 
-# Constants
-TICKERS = ['NVDA', 'NVIDIA', 'AMD', 'INTC', 'TSMC']  # Add more as needed
-MAX_TEXT_LENGTH = 500  # Maximum words in text
-SUMMARY_LENGTH = 100  # Words in summary
-
-# Subreddit to ticker mapping (all lowercase keys)
-SUBREDDIT_TICKERS = {
-    'nvidia': 'NVDA',
-    'amd': 'AMD',
-    'intel': 'INTC',
-    'tsmc': 'TSMC',
-    'wallstreetbets': None,  # General trading subreddit
-    'stocks': None,          # General trading subreddit
-    'investing': None,       # General trading subreddit
-    'stockmarket': None      # General trading subreddit
-}
-
-# Strong financial context words (high confidence)
-STRONG_FINANCE_WORDS = {
-    'stock', 'shares', 'ticker', 'earnings', 'revenue', 'dividend', 'market cap',
-    'trading', 'investor', 'bullish', 'bearish', '$', 'calls', 'puts', 'options',
-    'portfolio', 'shareholders', 'eps', 'pe ratio', 'market share', 'guidance',
-    'analyst', 'upgrade', 'downgrade', 'price target', 'short interest', 'float',
-    'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition'
-}
-
-# Weak financial context words (lower confidence)
-WEAK_FINANCE_WORDS = {
-    'buy', 'sell', 'price', 'trade', 'invest', 'market', 'portfolio', 'position',
-    'profit', 'loss', 'analysis', 'company', 'corporation', 'inc', 'ltd', 'tech',
-    'up', 'down', 'gain', 'drop', 'rise', 'fall', 'quarter', 'growth', 'decline',
-    'performance', 'trend', 'sector', 'industry', 'competition', 'partnership',
-    'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy'
-}
-
-# Common words that might be mistaken for tickers
-COMMON_WORDS = {
-    'THE', 'AND', 'FOR', 'ARE', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
-    'FROM', 'THIS', 'THAT', 'WITH', 'WHICH', 'WHEN', 'WHERE', 'WHAT', 'WHY', 'HOW', 'WHO',
-    'CAN', 'MAN', 'POST', 'LIVE', 'HAS', 'HAD', 'WAS', 'WERE', 'BEEN', 'BEING', 'HAVE', 'HAS',
-    'WILL', 'WOULD', 'SHALL', 'SHOULD', 'MAY', 'MIGHT', 'MUST', 'COULD', 'SHOULD', 'WOULD',
-    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'NOW', 'OUT', 'ALL', 'THEY', 'SAID', 'TIME', 'ABOUT',
-    'SOME', 'INTO', 'ALSO', 'THAN', 'THEN', 'WHEN', 'WHERE', 'WHY', 'HOW', 'WHAT', 'WHICH',
-    'THERE', 'HERE', 'THOSE', 'THESE', 'THEIR', 'THEM', 'THIS', 'THAT', 'THOSE', 'THESE',
-    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'SOME', 'TIME', 'GOOD', 'SAY', 'WAY', 'MOVE',
-    'BACK', 'LOOK', 'THINK', 'KNOW', 'MAKE', 'TAKE', 'COME', 'WELL', 'EVEN', 'WANT',
-    'NEED', 'MUCH', 'MANY', 'SUCH', 'MOST', 'PART', 'OVER', 'YEAR', 'HELP', 'WORK',
-    'LIFE', 'TELL', 'CASE', 'DAYS', 'FIND', 'NEXT', 'LAST', 'WEEK', 'GIVE', 'NAME',
-    'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE'
-}
-
 class RedditDataProcessor:
     def __init__(self):
         """Initialize the Reddit Data Processor."""
+        # lazy import heavy dependencies
+        from textblob import TextBlob
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        import torch
+        
         # Set up paths using path_config
         self.raw_path = RAW_DIR / "reddit_data"
         self.processed_path = PROCESSED_DIR / "reddit_data"
@@ -106,8 +63,8 @@ class RedditDataProcessor:
         # Initialize common word tickers
         self.common_word_tickers = COMMON_WORDS
         
-        # Initialize FinBERT with optimized GPU settings
-        print(f"{Fore.YELLOW}Initializing FinBERT model...{Style.RESET_ALL}")
+        # initialize finbert with optimized gpu settings.
+        self.torch = torch
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Set CUDA optimization flags if GPU is available
@@ -115,7 +72,7 @@ class RedditDataProcessor:
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
-            print(f"{Fore.GREEN}✓ CUDA optimizations enabled{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}✓ cuda optimizations enabled{Style.RESET_ALL}\n")
         
         # Load model and tokenizer with optimized settings
         self.finbert_tokenizer = AutoTokenizer.from_pretrained('ProsusAI/finbert')
@@ -125,12 +82,12 @@ class RedditDataProcessor:
             .eval()  # Set to eval mode immediately
         )
         
-        # Enable half-precision if on GPU
+        # enable half-precision if on gpu.
         if self.device.type == 'cuda':
             self.finbert_model = self.finbert_model.half()  # Convert to FP16
-            print(f"{Fore.GREEN}✓ Using FP16 precision for faster inference{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}✓ using fp16 precision for faster inference{Style.RESET_ALL}\n")
         
-        print(f"{Fore.GREEN}✓ FinBERT initialized on {self.device}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✓ finbert initialized on {self.device}{Style.RESET_ALL}")
         
         # Cache for FinBERT scores with size limit
         self.finbert_cache = {}
@@ -141,116 +98,28 @@ class RedditDataProcessor:
         self.standalone_ticker_pattern = re.compile(r'\b[A-Z]{3,5}\b')
         self.sentence_end_pattern = re.compile(r'[.!?]\s+')
         
-        # Initialize EntityLinker
-        print(f"{Fore.YELLOW}Initializing Entity Linker...{Style.RESET_ALL}")
+        # initialize our entity linker.
         self.entity_linker = EntityLinker()
+        print(f"{Fore.GREEN}✓ entity linker initialized{Style.RESET_ALL}")
         
         # Track confidence classes
         self.confidence_classes = {
-            'HIGH': [],    # FinBERT + Entity match
-            'MEDIUM': [],  # FinBERT only
-            'LOW': []      # Weak context
+            'HIGH': [],
+            'MEDIUM': [],
+            'LOW': []
         }
         
-        # Add well-known ETFs and their categories
-        self.etf_categories = {
-            'MARKET_INDEX': {
-                'SPY',  # S&P 500
-                'QQQ',  # Nasdaq-100
-                'IWM',  # Russell 2000
-                'DIA',  # Dow Jones
-                'VOO',  # Vanguard S&P 500
-                'VTI'   # Vanguard Total Market
-            },
-            'SECTOR': {
-                'XLF',  # Financial
-                'XLE',  # Energy
-                'XLV',  # Healthcare
-                'XLK',  # Technology
-                'XLI',  # Industrial
-                'XLP',  # Consumer Staples
-                'XLY',  # Consumer Discretionary
-                'XLB',  # Materials
-                'XLU',  # Utilities
-                'XLRE', # Real Estate
-                'XLC'   # Communication Services
-            },
-            'COMMODITY': {
-                'GLD',  # Gold
-                'SLV',  # Silver
-                'USO',  # Oil
-                'UNG'   # Natural Gas
-            },
-            'BOND': {
-                'TLT',  # 20+ Year Treasury
-                'IEF',  # 7-10 Year Treasury
-                'HYG',  # High Yield Corporate
-                'LQD',  # Investment Grade Corporate
-                'AGG',  # Aggregate Bond
-                'BND'   # Vanguard Total Bond
-            },
-            'INTERNATIONAL': {
-                'EFA',  # Developed Markets
-                'EEM',  # Emerging Markets
-                'VEA',  # Vanguard Developed Markets
-                'VWO',  # Vanguard Emerging Markets
-                'VGK'   # Vanguard European
-            }
-        }
-        
-        # Flatten ETF list for quick lookup
-        self.valid_etfs = {etf for category in self.etf_categories.values() for etf in category}
-        
-        # Well-known stock tickers that should have lower validation requirements
-        self.well_known_tickers = {
-            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'JPM', 'BAC', 'WFC',
-            'INTC', 'AMD', 'CSCO', 'ORCL', 'IBM', 'PLTR', 'COIN', 'GME', 'AMC', 'BB',
-            'F', 'GM', 'GE', 'BA', 'RTX', 'LMT', 'NOC',
-            'PFE', 'JNJ', 'MRK', 'CVS', 'UNH',
-            'KO', 'PEP', 'MCD', 'WMT', 'TGT',
-            'DIS', 'NFLX', 'CMCSA', 'T', 'VZ'
-        }
-        
-        # Add negative context patterns that invalidate ticker matches
-        self.negative_context_patterns = {
-            'COIN': [
-                'meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin',
-                'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin',
-                'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin',
-                'crypto coin', 'cryptocurrency', 'token'
-            ],
-            'GOLD': ['gold standard', 'gold medal', 'gold mine', 'gold rush', 'gold price'],
-            'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job'],
-            'CASH': ['cash app', 'cash out', 'cash flow', 'cash back', 'cash money'],
-            'MOON': ['to the moon', 'moon shot', 'moon boy', 'moon mission'],
-            'PUMP': ['pump and dump', 'pump scheme', 'pump group'],
-            'HOLD': ['hold on', 'hold up', 'hold tight', 'hold steady'],
-            'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank']
-        }
-        
-        # Add ambiguous financial tickers that need extra validation
-        self.ambiguous_financial_tickers = {
-            'COIN': {
-                'required_context': ['coinbase', 'nasdaq:coin', 'nyse:coin'],
-                'company_terms': ['coinbase', 'armstrong', 'crypto exchange', 'cryptocurrency exchange'],
-                'min_confidence': 0.9
-            },
-            'GOLD': {
-                'required_context': ['gld etf', 'gold etf', 'gold shares'],
-                'company_terms': ['spdr', 'state street', 'gold trust'],
-                'min_confidence': 0.85
-            },
-            'CASH': {
-                'required_context': ['money market', 'cash management'],
-                'company_terms': ['money market fund', 'cash equivalent'],
-                'min_confidence': 0.9
-            }
-        }
+        # load ticker configs
+        self.etf_categories = ETF_CATEGORIES
+        self.valid_etfs = VALID_ETFS
+        self.well_known_tickers = WELL_KNOWN_TICKERS
+        self.negative_context_patterns = NEGATIVE_CONTEXT_PATTERNS
+        self.ambiguous_financial_tickers = AMBIGUOUS_FINANCIAL_TICKERS
         
         # Add rejection reasons tracking
         self.rejection_reasons = defaultdict(int)
         
-        print(f"{Fore.GREEN}✓ Reddit Data Processor initialized{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✓ reddit data processor initialized{Style.RESET_ALL}\n")
     
     def _get_context_window(self, text: str, target: str, window_size: int = 20) -> str:
         """Get a window of words around a target word."""
@@ -286,7 +155,7 @@ class RedditDataProcessor:
             if uncached_texts:
                 try:
                     # Tokenize all texts in batch
-                    with torch.cuda.amp.autocast() if self.device.type == 'cuda' else nullcontext():
+                    with self.torch.cuda.amp.autocast() if self.device.type == 'cuda' else nullcontext():
                         inputs = self.finbert_tokenizer(
                             uncached_texts,
                             return_tensors="pt",
@@ -296,9 +165,9 @@ class RedditDataProcessor:
                         ).to(self.device)
                         
                         # Process batch with memory optimization
-                        with torch.no_grad():
+                        with self.torch.no_grad():
                             outputs = self.finbert_model(**inputs)
-                            probabilities = torch.nn.functional.softmax(outputs.logits, dim=1)
+                            probabilities = self.torch.nn.functional.softmax(outputs.logits, dim=1)
                             financial_scores = (probabilities[:, 0] + probabilities[:, 2]).cpu().numpy()
                         
                         # Update cache and scores
@@ -313,7 +182,7 @@ class RedditDataProcessor:
                             
                         # Clear CUDA cache periodically
                         if self.device.type == 'cuda' and i % (batch_size * 10) == 0:
-                            torch.cuda.empty_cache()
+                            self.torch.cuda.empty_cache()
                             
                 except Exception as e:
                     logger.error(f"Error in FinBERT batch processing: {str(e)}")
@@ -707,15 +576,58 @@ class RedditDataProcessor:
             logger.error(f"Error saving per-ticker sentiment files: {str(e)}")
         
         return valid_tickers
+    
+    def load_all_reddit_data(self):
+        """load all reddit csv files, combine, and deduplicate by post id."""
+        # print step header.
+        print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}  step 2: processing the reddit data{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}loading reddit data files...{Style.RESET_ALL}")
+        
+        all_dfs = []
+        csv_files = list(self.raw_path.glob("reddit_posts_*.csv"))
+        
+        if not csv_files:
+            logger.warning("no reddit data files found")
+            print(f"{Fore.RED}✗ no reddit data files found{Style.RESET_ALL}\n")
+            return None
+        
+        # load all csv files
+        for file in csv_files:
+            try:
+                df = pd.read_csv(file)
+                all_dfs.append(df)
+                logger.info(f"loaded {len(df)} posts from {file.name}")
+            except Exception as e:
+                logger.warning(f"error loading {file.name}: {str(e)}")
+                continue
+        
+        if not all_dfs:
+            print(f"{Fore.RED}✗ no valid reddit data files{Style.RESET_ALL}\n")
+            return None
+        
+        # combine and deduplicate
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+        original_count = len(combined_df)
+        combined_df = combined_df.drop_duplicates(subset=['id'], keep='last')
+        duplicate_count = original_count - len(combined_df)
+        
+        if duplicate_count > 0:
+            logger.info(f"removed {duplicate_count} duplicate posts across files")
+            print(f"{Fore.GREEN}✓ loaded {len(combined_df)} unique posts (removed {duplicate_count} duplicates){Style.RESET_ALL}\n")
+        else:
+            print(f"{Fore.GREEN}✓ loaded {len(combined_df)} unique posts{Style.RESET_ALL}\n")
+        
+        return combined_df
         
     def process_reddit_data(self, df):
         """Process raw Reddit data with enhanced features and debug logging."""
         try:
-            print(f"\n{Fore.CYAN}Processing Reddit Data Pipeline{Style.RESET_ALL}")
             total_steps = 8
             
             # Step 1: Initial Processing
-            print(f"\n{Fore.YELLOW}[1/{total_steps}] Initial Data Processing{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}[1/{total_steps}] Initial Data Processing{Style.RESET_ALL}")
             logger.info(f"Initial post count: {len(df)}")
             processed_df = df.copy()
             
@@ -1161,47 +1073,30 @@ def main():
     # Initialize processor
     processor = RedditDataProcessor()
 
-    # Process each CSV file in the raw reddit data directory
-    for file in os.listdir(processor.raw_path):
-        if file.endswith(".csv"):
-            try:
-                filepath = processor.raw_path / file
-                logger.info(f"Processing file: {filepath}")
-                
-                # Read the CSV file
-                df = pd.read_csv(filepath)
-                
-                # Process the data
-                processed_df, daily_metrics = processor.process_reddit_data(df)
-                
-                if processed_df is not None and daily_metrics is not None:
-                    # Map common company names to tickers
-                    name_to_ticker = {
-                        'NVIDIA': 'NVDA',
-                        'AMD': 'AMD',
-                        'INTEL': 'INTC',
-                        'TSMC': 'TSM'
-                    }
-                    
-                    # Extract name from filename and convert to ticker
-                    input_name = file.split("_")[0].upper()
-                    output_name = name_to_ticker.get(input_name, input_name)
-                    
-                    # Save detailed processed data
-                    detailed_file = processor.processed_path / f"{output_name}_detailed_sentiment.csv"
-                    processed_df.to_csv(detailed_file, index=False)
-                    
-                    # Save daily aggregated data
-                    daily_file = processor.processed_path / f"{output_name}_daily_sentiment.csv"
-                    daily_metrics.to_csv(daily_file, index=False)
-                    
-                    logger.info(f"Saved detailed sentiment data to {detailed_file}")
-                    logger.info(f"Saved daily sentiment data to {daily_file}")
-                else:
-                    logger.error(f"Failed to process data from {file}")
-                    
-            except Exception as e:
-                logger.error(f"Error processing {file}: {str(e)}")
+    # Load all reddit csv files, combine, and deduplicate
+    print(f"\n{Fore.CYAN}Loading Reddit data files...{Style.RESET_ALL}")
+    df = processor.load_all_reddit_data()
+    
+    if df is None or df.empty:
+        print(f"{Fore.RED}✗ No Reddit data found to process{Style.RESET_ALL}")
+        return
+    
+    print(f"{Fore.GREEN}✓ Loaded {len(df)} unique posts (after deduplication){Style.RESET_ALL}\n")
+    
+    # Process the combined data
+    try:
+        processed_df, daily_metrics = processor.process_reddit_data(df)
+        
+        if processed_df is not None and daily_metrics is not None:
+            print(f"{Fore.GREEN}✓ Processing completed successfully{Style.RESET_ALL}")
+            print(f"  Processed {len(processed_df)} posts")
+            print(f"  Daily metrics: {len(daily_metrics)} days")
+        else:
+            print(f"{Fore.RED}✗ Processing failed{Style.RESET_ALL}")
+            
+    except Exception as e:
+        logger.error(f"Error processing Reddit data: {str(e)}")
+        print(f"{Fore.RED}✗ Error: {str(e)}{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     main() 

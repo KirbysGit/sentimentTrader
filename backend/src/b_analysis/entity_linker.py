@@ -25,11 +25,11 @@ class EntityLinker:
     
     def __init__(self, cache_duration_days: int = 1):
         """Initialize the entity linker."""
-        # Initialize cache file path
+        # initialize cache file path.
         self.cache_file = Path(os.path.join(REFERENCES_DIR, 'entity_cache.json'))
         self.cache_duration = timedelta(days=cache_duration_days)
         
-        # Initialize common word tickers to filter out
+        # initialize common word tickers to filter out.
         self.common_word_tickers = {
             'A', 'ALL', 'AM', 'AN', 'AND', 'ANY', 'ARE', 'AS', 'AT', 'BE', 'BY', 'CAN', 'DO', 'FOR', 'FROM', 'GO', 'HAS',
             'HAD', 'HE', 'HER', 'HERE', 'HIS', 'HOW', 'I', 'IF', 'IN', 'INTO', 'IS', 'IT', 'ITS', 'JOB', 'MAY', 'ME',
@@ -38,7 +38,7 @@ class EntityLinker:
             'WAS', 'WE', 'WERE', 'WHAT', 'WHEN', 'WHO', 'WILL', 'WITH', 'YOU', 'YOUR'
         }
         
-        # Initialize valid ETFs that should always be considered valid
+        # initialize valid etfs that should always be considered valid.
         self.valid_etfs = {
             'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'AGG', 'TLT', 'IEF', 'SHY', 'LQD', 'HYG',
             'GLD', 'SLV', 'USO', 'UNG', 'DBC', 'VNQ', 'XLF', 'XLE', 'XLV', 'XLK', 'XLI', 'XLP', 'XLY', 'XLB', 'XLU',
@@ -47,22 +47,19 @@ class EntityLinker:
             'FXE', 'FXY', 'FXB', 'FXF', 'FXC', 'FXA'
         }
         
-        # Initialize tracking
+        # initialize tracking.
         self.match_history = []
         self.entities = {}
         
-        # Initialize fallback entities
+        # initialize fallback entities.
         self._fallback_entities = self._get_fallback_entities()
         
-        # Load cached entities
+        # load cached entities.
         self._load_cached_entities()
         
-        print(f"\n{Fore.CYAN}Initializing Entity Linker...{Style.RESET_ALL}")
-        
-        # Initialize confidence scores
+        # initialize confidence scores.
         self.confidence_scores = defaultdict(list)
         
-        print(f"{Fore.GREEN}✓ Entity Linker initialized successfully{Style.RESET_ALL}\n")
     
     def _load_cached_entities(self):
         """Load entity cache from file."""

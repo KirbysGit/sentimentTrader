@@ -1,0 +1,159 @@
+# main pipeline configuration file
+
+# ============================================================================
+# stage 1: reddit collection config
+# ============================================================================
+
+# high-signal subreddits for stock prediction (organized by priority)
+HIGH_SIGNAL_MUST_HAVE = [
+    'wallstreetbets',  # extreme sentiment, high volume
+    'stocks',          # general stock discussion
+    'investing',       # investment-focused discussions
+    'StockMarket'      # market-wide discussions
+]
+
+HIGH_SIGNAL_ADDITIONAL = [
+    'news',            # general news (can affect markets)
+    'worldnews',       # global news (market impacts)
+    'finance',         # broader finance discussions
+    'technology',      # tech sector sentiment
+    'cryptocurrency',  # overlapping sentiment trends
+    'pennystocks'      # extreme sentiment spikes
+]
+
+# active production subreddits (currently using must-have only)
+SUBREDDITS = HIGH_SIGNAL_MUST_HAVE.copy()
+SORT_METHODS = ['new', 'top', 'hot']  # collects from all 3 sort methods
+
+# test mode config (faster for testing - single subreddit, single sort)
+TEST_SUBREDDITS = ['wallstreetbets']
+TEST_SORT_METHODS = ['new']
+
+# collection math:
+# - production: 4 subreddits × 3 sorts × 100 posts = up to 1,200 posts
+# - test: 1 subreddit × 1 sort × 10 posts = 10 posts
+# - with additional subs: 10 subreddits × 3 sorts × 100 posts = up to 3,000 posts
+
+# ============================================================================
+# stage 2: ticker analysis config
+# ============================================================================
+
+# basic ticker config
+TICKERS = ['NVDA', 'NVIDIA', 'AMD', 'INTC', 'TSMC']
+MAX_TEXT_LENGTH = 500
+SUMMARY_LENGTH = 100
+
+# subreddit to ticker mapping (all lowercase keys)
+SUBREDDIT_TICKERS = {
+    'nvidia': 'NVDA',
+    'amd': 'AMD',
+    'intel': 'INTC',
+    'tsmc': 'TSMC',
+    'wallstreetbets': None,
+    'stocks': None,
+    'investing': None,
+    'stockmarket': None
+}
+
+# strong financial context words (high confidence)
+STRONG_FINANCE_WORDS = {
+    'stock', 'shares', 'ticker', 'earnings', 'revenue', 'dividend', 'market cap',
+    'trading', 'investor', 'bullish', 'bearish', '$', 'calls', 'puts', 'options',
+    'portfolio', 'shareholders', 'eps', 'pe ratio', 'market share', 'guidance',
+    'analyst', 'upgrade', 'downgrade', 'price target', 'short interest', 'float',
+    'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition'
+}
+
+# weak financial context words (lower confidence)
+WEAK_FINANCE_WORDS = {
+    'buy', 'sell', 'price', 'trade', 'invest', 'market', 'portfolio', 'position',
+    'profit', 'loss', 'analysis', 'company', 'corporation', 'inc', 'ltd', 'tech',
+    'up', 'down', 'gain', 'drop', 'rise', 'fall', 'quarter', 'growth', 'decline',
+    'performance', 'trend', 'sector', 'industry', 'competition', 'partnership',
+    'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy'
+}
+
+# common words that might be mistaken for tickers
+COMMON_WORDS = {
+    'THE', 'AND', 'FOR', 'ARE', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
+    'FROM', 'THIS', 'THAT', 'WITH', 'WHICH', 'WHEN', 'WHERE', 'WHAT', 'WHY', 'HOW', 'WHO',
+    'CAN', 'MAN', 'POST', 'LIVE', 'HAS', 'HAD', 'WAS', 'WERE', 'BEEN', 'BEING', 'HAVE', 'HAS',
+    'WILL', 'WOULD', 'SHALL', 'SHOULD', 'MAY', 'MIGHT', 'MUST', 'COULD', 'SHOULD', 'WOULD',
+    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'NOW', 'OUT', 'ALL', 'THEY', 'SAID', 'TIME', 'ABOUT',
+    'SOME', 'INTO', 'ALSO', 'THAN', 'THEN', 'WHEN', 'WHERE', 'WHY', 'HOW', 'WHAT', 'WHICH',
+    'THERE', 'HERE', 'THOSE', 'THESE', 'THEIR', 'THEM', 'THIS', 'THAT', 'THOSE', 'THESE',
+    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'SOME', 'TIME', 'GOOD', 'SAY', 'WAY', 'MOVE',
+    'BACK', 'LOOK', 'THINK', 'KNOW', 'MAKE', 'TAKE', 'COME', 'WELL', 'EVEN', 'WANT',
+    'NEED', 'MUCH', 'MANY', 'SUCH', 'MOST', 'PART', 'OVER', 'YEAR', 'HELP', 'WORK',
+    'LIFE', 'TELL', 'CASE', 'DAYS', 'FIND', 'NEXT', 'LAST', 'WEEK', 'GIVE', 'NAME',
+    'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE'
+}
+
+# etf categories
+ETF_CATEGORIES = {
+    'MARKET_INDEX': {
+        'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'
+    },
+    'SECTOR': {
+        'XLF', 'XLE', 'XLV', 'XLK', 'XLI', 'XLP', 'XLY', 'XLB', 'XLU', 'XLRE', 'XLC'
+    },
+    'COMMODITY': {
+        'GLD', 'SLV', 'USO', 'UNG'
+    },
+    'BOND': {
+        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND'
+    },
+    'INTERNATIONAL': {
+        'EFA', 'EEM', 'VEA', 'VWO', 'VGK'
+    }
+}
+
+# flatten etf list for quick lookup
+VALID_ETFS = {etf for category in ETF_CATEGORIES.values() for etf in category}
+
+# well-known stock tickers
+WELL_KNOWN_TICKERS = {
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'JPM', 'BAC', 'WFC',
+    'INTC', 'AMD', 'CSCO', 'ORCL', 'IBM', 'PLTR', 'COIN', 'GME', 'AMC', 'BB',
+    'F', 'GM', 'GE', 'BA', 'RTX', 'LMT', 'NOC',
+    'PFE', 'JNJ', 'MRK', 'CVS', 'UNH',
+    'KO', 'PEP', 'MCD', 'WMT', 'TGT',
+    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ'
+}
+
+# negative context patterns that invalidate ticker matches
+NEGATIVE_CONTEXT_PATTERNS = {
+    'COIN': [
+        'meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin',
+        'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin',
+        'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin',
+        'crypto coin', 'cryptocurrency', 'token'
+    ],
+    'GOLD': ['gold standard', 'gold medal', 'gold mine', 'gold rush', 'gold price'],
+    'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job'],
+    'CASH': ['cash app', 'cash out', 'cash flow', 'cash back', 'cash money'],
+    'MOON': ['to the moon', 'moon shot', 'moon boy', 'moon mission'],
+    'PUMP': ['pump and dump', 'pump scheme', 'pump group'],
+    'HOLD': ['hold on', 'hold up', 'hold tight', 'hold steady'],
+    'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank']
+}
+
+# ambiguous financial tickers that need extra validation
+AMBIGUOUS_FINANCIAL_TICKERS = {
+    'COIN': {
+        'required_context': ['coinbase', 'nasdaq:coin', 'nyse:coin'],
+        'company_terms': ['coinbase', 'armstrong', 'crypto exchange', 'cryptocurrency exchange'],
+        'min_confidence': 0.9
+    },
+    'GOLD': {
+        'required_context': ['gld etf', 'gold etf', 'gold shares'],
+        'company_terms': ['spdr', 'state street', 'gold trust'],
+        'min_confidence': 0.85
+    },
+    'CASH': {
+        'required_context': ['money market', 'cash management'],
+        'company_terms': ['money market fund', 'cash equivalent'],
+        'min_confidence': 0.9
+    }
+}
+
