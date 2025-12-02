@@ -7,6 +7,8 @@ from src.utils.config import (
     WSB_SLANG,
     WSB_FINANCE_BLACKLIST,
     CONTEXT_REQUIRED_TICKERS,
+    VALID_ETFS,
+    WELL_KNOWN_TICKERS,
 )
 from .entity_linker import EntityLinker
 
@@ -59,20 +61,48 @@ class TickerExtractor:
 
     # ------------------------------------------------------------------
     def _filter_noise_tickers(self, tickers: List[str], text: str) -> List[str]:
-        """Drop macro terms / slang / context-free uppercase words."""
+        """Advanced filtering: blacklist, alias checks, ETF checks, and local context."""
         clean = []
         text_low = text.lower() if text else ""
+        words = text_low.split()
+
+        fin_context_words = {
+            "stock", "stocks", "market", "share", "shares", "price", "prices",
+            "earnings", "revenue", "eps", "analyst", "valuation", "guidance",
+            "options", "calls", "puts", "trading", "trade", "invest", "buy", "sell",
+            "portfolio", "ticker", "etf", "company", "fund", "short", "long",
+        }
 
         for ticker in tickers:
-            if ticker in MACRO_TERMS:
+            if ticker in MACRO_TERMS or ticker in WSB_SLANG or ticker in WSB_FINANCE_BLACKLIST:
                 continue
-            if ticker in WSB_SLANG:
+            if len(ticker) == 1 and ticker not in {"F"}:
                 continue
-            if ticker in WSB_FINANCE_BLACKLIST:
+            if ticker == "ET" and re.search(r"\b\d{1,2}:\d{2}\s*(?:am|pm)?\s*et\b", text_low):
                 continue
+
+            if ticker in WELL_KNOWN_TICKERS or ticker in VALID_ETFS:
+                clean.append(ticker)
+                continue
+
             if ticker in CONTEXT_REQUIRED_TICKERS:
-                # only keep if company alias context exists
                 if not self.entity_linker.has_alias_context(text_low, ticker):
                     continue
+
+            positions = [i for i, w in enumerate(words) if w == ticker.lower()]
+            if not positions:
+                continue
+
+            strong_context_found = False
+            for pos in positions:
+                window = words[max(0, pos - 5): pos + 6]
+                if any(w in fin_context_words for w in window):
+                    strong_context_found = True
+                    break
+
+            if not strong_context_found:
+                continue
+
             clean.append(ticker)
+
         return clean

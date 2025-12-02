@@ -45,7 +45,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, Style
 from datetime import datetime, timedelta
-
 from src.utils.path_config import RAW_DIR
 from src.utils.config import (
     SUBREDDITS,

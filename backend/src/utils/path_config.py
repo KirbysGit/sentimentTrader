@@ -25,6 +25,9 @@ STOCK_DATA_DIR = RAW_DIR / "stock_data"
 PROCESSED_REDDIT_DIR = PROCESSED_DIR / "reddit_data"
 RESULTS_DIR = PROJECT_ROOT / "results"
 
+# Diagnostics directory (lives alongside analysis code)
+DIAGNOSTICS_DIR = SRC_DIR / "b_analysis" / "diagnostics"
+
 # Reference files paths
 VALID_TICKERS_FILE = REFERENCES_DIR / "valid_tickers.csv"
 ENTITY_CACHE_FILE = REFERENCES_DIR / "entity_cache.json"

@@ -62,28 +62,28 @@ CONTEXT_REQUIRED_TICKERS = {
 
 # comprehensive blacklist covering slang, macro terms, finance acronyms, TA words
 WSB_FINANCE_BLACKLIST = {
-    "A", "AHH", "AI", "ALL", "AND", "ANY", "ARE",
+    "A", "AGAIN", "AHH", "AI", "ALL", "AND", "ANY", "ARE",
     "ATH", "ATM", "BREAK", "BREAKOUT", "BULL", "BUT",
-    "CALL", "CALLS", "CAN", "CAGR", "CHEAP", "CPI", "CPU",
-    "COULD", "DD", "DELTA", "DIAMOND", "DUMP", "DCF",
-    "DO", "DOWN", "EBITDA", "EMA", "EPS", "ETFS",
-    "ETF", "EV", "EU", "FIB", "FED", "FCF", "FOMO",
+    "CALL", "CALLS", "CAN", "CAGR", "CAT", "CHEAP", "CPI", "CPU",
+    "COULD", "CUDA", "DD", "DEAD", "DELTA", "DIAMOND", "DUMP", "DCF",
+    "DO", "DOWN", "EDA", "EBITDA", "EMA", "EPS", "ETFS",
+    "ETF", "ET", "EV", "EU", "FIB", "FED", "FCF", "FAILS", "FOMO",
     "FOMU", "FUD", "GAIN", "GAINZ", "GAMMA", "GDP",
     "GG", "GO", "GREEN", "GPU", "HODL", "HIGH",
     "HOW", "HUGE", "IMF", "IN", "IRS", "ITM",
     "IV", "IVR", "JOB", "LEFT", "LEAP", "LEAPS",
     "LOSS", "LMAO", "LOL", "LOW", "MACD", "MAY",
-    "ML", "MOASS", "MUST", "NAV", "NEXT", "NOT",
+    "ML", "MOASS", "MUST", "NAV", "NEXT", "NIM", "NOT",
     "NOW", "ON", "ONE", "OTM", "OUT", "OI", "P",
-    "PAT", "PBT", "PE", "PCE", "PIVOT", "PUMP",
+    "PAT", "PBT", "PE", "PCE", "PIVOT", "PRESS", "PUMP",
     "PUT", "PUTS", "QOQ", "QE", "QT", "RED",
     "RESISTANCE", "RETURN", "RIGHT", "ROA",
     "ROE", "ROI", "RSI", "SAFE", "SCALP",
     "SEC", "SHOULD", "SHORT", "SMA", "STONKS",
     "STRIKE", "SUPPORT", "S", "T", "TENDIES",
     "THE", "THEY", "THEM", "THAT", "THIS",
-    "THETA", "TLDR", "TPU", "TREND", "TWO",
-    "UP", "VWAP", "WAS", "WILL", "WHAT", "WHY",
+    "THETA", "THICC", "TLDR", "TPU", "TREND", "TWO",
+    "UP", "UK", "VWAP", "WAS", "WENDY", "WILL", "WHAT", "WHY",
     "WTF", "YOLO", "YOY", "YCC"
 }
 
