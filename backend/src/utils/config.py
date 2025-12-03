@@ -57,7 +57,7 @@ WSB_SLANG = {
 }
 
 CONTEXT_REQUIRED_TICKERS = {
-    'AI', 'GDP', 'VAT', 'YCC', 'TL', 'DR'
+    'AI', 'GDP', 'VAT', 'YCC', 'TL', 'DR', 'GOLD'
 }
 
 # comprehensive blacklist covering slang, macro terms, finance acronyms, TA words
@@ -84,7 +84,33 @@ WSB_FINANCE_BLACKLIST = {
     "THE", "THEY", "THEM", "THAT", "THIS",
     "THETA", "THICC", "TLDR", "TPU", "TREND", "TWO",
     "UP", "UK", "VWAP", "WAS", "WENDY", "WILL", "WHAT", "WHY",
-    "WTF", "YOLO", "YOY", "YCC"
+    "WTF", "YOLO", "YOY", "YCC",
+    # pipeline-observed false tickers
+    "BNPL", "CEO", "FDA", "WSB", "USD", "NTM",
+    # additional review false positives
+    "US", "USA", "UAE", "EUR", "GBP", "JPY",
+    "MIT", "WSJ", "CNBC", "NYT", "BBC", "NCIA",
+    "COVID", "HSA", "IRA", "LTCG",
+    "GPT", "API", "AWS", "FSD", "GEX", "ZIRP", "DCA", "EMH", "AGI", "ASI", "MAG",
+    "HCOL", "ADV", "LLC", "PM",
+}
+
+# Symbols we never want heading into stock collection (non-equity, macro)
+STOCK_DATA_BLACKLIST = {
+    "BNPL", "CEO", "CPI", "GDP", "FDA", "USD", "WSB", "NTM", "BTC", "ETH",
+    "WAIT", "TONS", "DYOR", "SEVEN", "WORTH",
+    "LONG", "AFTER", "NEVER", "FIRST", "FEAST",
+    "BETA", "ARPU", "SPAC",
+    "AZURE", "SCION", "NAND", "EPYC", "ASSET",
+    "NYSE", "FTSE", "CNBC",
+    "JATEC", "LBNL", "OPAI",
+    "OPEN",
+}
+
+# extra stopwords removed after stage 2 to avoid false positives
+FINAL_STAGE_STOPWORDS = {
+    "YES", "RE", "PART", "MODE", "MINE", "JUICY", "STILL", "SETUP", "RJ", "MATH",
+    "OPEN",
 }
 
 # subreddit to ticker mapping (all lowercase keys)
@@ -117,6 +143,21 @@ WEAK_FINANCE_WORDS = {
     'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy'
 }
 
+# sentiment lexicon used by SentimentScorer (extend freely)
+POSITIVE_SENTIMENT_WORDS = {
+    "up", "bull", "bullish", "gain", "green", "beat", "pump", "moon", "mooning",
+    "strong", "win", "positive", "profit", "surge", "soar", "rocket", "pump",
+    "rip", "squeeze", "run", "ath", "momentum", "breakout", "climb", "pumpage",
+    "jump", "skyrocket", "crush", "smash", "crank", "double", "tripled", "explode"
+}
+
+NEGATIVE_SENTIMENT_WORDS = {
+    "down", "bear", "bearish", "loss", "dump", "crash", "bad", "miss", "weak",
+    "negative", "red", "selloff", "plunge", "tank", "bleed", "collapse", "bag",
+    "rug", "rugged", "sink", "dumped", "dropped", "halved", "wrecked", "implode",
+    "panic", "sell", "sold", "fear", "beartrap"
+}
+
 # common words that might be mistaken for tickers
 COMMON_WORDS = {
     'THE', 'AND', 'FOR', 'ARE', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
@@ -130,25 +171,30 @@ COMMON_WORDS = {
     'BACK', 'LOOK', 'THINK', 'KNOW', 'MAKE', 'TAKE', 'COME', 'WELL', 'EVEN', 'WANT',
     'NEED', 'MUCH', 'MANY', 'SUCH', 'MOST', 'PART', 'OVER', 'YEAR', 'HELP', 'WORK',
     'LIFE', 'TELL', 'CASE', 'DAYS', 'FIND', 'NEXT', 'LAST', 'WEEK', 'GIVE', 'NAME',
-    'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE'
+    'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE',
+    'WAIT', 'AFTER', 'LONG', 'FIRST', 'NEVER', 'WORTH', 'SEVEN', 'FEAST'
 }
 
 # etf categories
 ETF_CATEGORIES = {
     'MARKET_INDEX': {
-        'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'
+        'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI',
+        'SPXL', 'TQQQ',
     },
     'SECTOR': {
         'XLF', 'XLE', 'XLV', 'XLK', 'XLI', 'XLP', 'XLY', 'XLB', 'XLU', 'XLRE', 'XLC'
     },
     'COMMODITY': {
-        'GLD', 'SLV', 'USO', 'UNG'
+        'GLD', 'SLV', 'USO', 'UNG', 'PHYS', 'URA'
     },
     'BOND': {
-        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND'
+        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND', 'VHYG', 'TIPS'
     },
     'INTERNATIONAL': {
-        'EFA', 'EEM', 'VEA', 'VWO', 'VGK'
+        'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT'
+    },
+    'CRYPTO': {
+        'IBIT', 'BITB'
     }
 }
 
@@ -162,7 +208,15 @@ WELL_KNOWN_TICKERS = {
     'F', 'GM', 'GE', 'BA', 'RTX', 'LMT', 'NOC',
     'PFE', 'JNJ', 'MRK', 'CVS', 'UNH',
     'KO', 'PEP', 'MCD', 'WMT', 'TGT',
-    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ'
+    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ',
+    'RGTI', 'RGTZ', 'SEZL',
+    'MSTR', 'RDDT', 'GOOG', 'ANET', 'HOOD', 'DKNG', 'MSCI', 'ADP',
+    'VEQT', 'VHYG', 'PHYS', 'URA',
+    'SCHD', 'VIGAX', 'FSKAX', 'FSPGX', 'VNYTX', 'FDVV', 'VYMI',
+    'MAGA', 'GGLL', 'XOVR',
+    'UUUU', 'SMR', 'OKLO', 'RKLB', 'ASTS', 'ACHR',
+    'SOND', 'ANF', 'KSS', 'LSEG',
+    'ALAB', 'IREN',
 }
 
 # negative context patterns that invalidate ticker matches
@@ -190,9 +244,9 @@ AMBIGUOUS_FINANCIAL_TICKERS = {
         'min_confidence': 0.9
     },
     'GOLD': {
-        'required_context': ['gld etf', 'gold etf', 'gold shares'],
-        'company_terms': ['spdr', 'state street', 'gold trust'],
-        'min_confidence': 0.85
+        'required_context': ['barrick', 'barrick gold', 'gld etf', 'gold etf', 'gold shares'],
+        'company_terms': ['barrick', 'spdr', 'state street', 'gold trust'],
+        'min_confidence': 0.8
     },
     'CASH': {
         'required_context': ['money market', 'cash management'],

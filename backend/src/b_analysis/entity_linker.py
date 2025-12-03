@@ -1,81 +1,67 @@
 # src/b_analysis/entity_linker.py
 
 """
-Minimal EntityLinker
---------------------
-Purpose:
-    - Validate ticker mentions
-    - Boost confidence based on simple context clues
-    - Zero external calls or caching
-    - Fast + predictable + stable
+purpose:
+  validate extracted tickers, boost or reject them using light context rules,
+  and hand a clean symbol list to downstream scoring.
 
-This module intentionally avoids:
-    - Web scraping
-    - Yahoo Finance lookups
-    - Officers/products parsing
-    - Industry/sector logic
+what this does for us:
+  - filters obvious junk (common words, macro terms, blocked symbols)
+  - auto-accepts ETFs/whitelisted aliases for speed
+  - boosts confidence when company keywords or aliases appear in text
+  - flags context-required symbols (AI, GDP, etc.) if supporting words are missing
 
-It plays a *supporting* role to TickerExtractor,
-not a primary detection role.
+where it fits:
+  stage 2 (analysis). TickerExtractor emits raw candidates → EntityLinker
+  trims/boosts them → RedditDataProcessor continues with sentiment + diagnostics.
+
+organization:
+  - imports
+  - EntityLinker class
+    - __init__: load config-driven blacklists/whitelists
+    - validate: core yes/no + base confidence
+    - boost_confidences: apply post-validation score nudges
+    - has_alias_context: helper for context keyword checks
 """
 
+# imports.
 import logging
-from typing import Dict, Tuple, List
+from typing import Tuple, List
+
+# local imports.
 from src.utils.config import (
     MACRO_TERMS,
     WSB_SLANG,
-    CONTEXT_REQUIRED_TICKERS
+    CONTEXT_REQUIRED_TICKERS,
+    STOCK_DATA_BLACKLIST,
+    COMMON_WORDS,
+    VALID_ETFS,
 )
+from src.utils.ticker_aliases import TICKER_ALIASES
+from src.utils.ticker_context_config import TICKER_CONTEXT, CONTEXT_BLACKLIST
 
+# setup logging.
 logger = logging.getLogger(__name__)
 
 
+# entity linker class
 class EntityLinker:
     """Lightweight context-based validator for extracted ticker symbols."""
 
     def __init__(self):
-        # ------------------------------------------------------------
-        # Common-word blacklist (false positives)
-        # ------------------------------------------------------------
-        self.common_word_blacklist = {
-            'A', 'AM', 'AN', 'ARE', 'AS', 'AT', 'BE', 'BY', 'CAN', 'DO', 'FOR',
-            'GO', 'HAS', 'HAD', 'HE', 'HER', 'HIS', 'HOW', 'I', 'IF', 'IN', 'IS',
-            'IT', 'JOB', 'MAN', 'NEW', 'NO', 'NOT', 'NOW', 'OF', 'ON', 'ONE',
-            'OR', 'OUT', 'SEE', 'SHE', 'SO', 'SOME', 'THE', 'THEM', 'THEY',
-            'THIS', 'TO', 'UP', 'US', 'WAS', 'WE', 'WERE', 'WHAT', 'WHEN', 'WHO',
-            'WITH', 'YOU', 'YOUR'
-        }
+        """initialize entity linker with common word blacklist and ETF whitelist."""
+        self.common_word_blacklist = set(COMMON_WORDS)
+        self.etf_whitelist = set(VALID_ETFS)
 
-        # ------------------------------------------------------------
-        # ETF whitelist — always valid and high confidence
-        # ------------------------------------------------------------
-        self.etf_whitelist = {
-            'SPY', 'QQQ', 'IWM', 'DIA',
-            'VTI', 'VOO', 'BND', 'TLT',
-            'XLF', 'XLK', 'XLV', 'XLE', 'XLY', 'XLI',
-            'XLP', 'XLB', 'XLC', 'XLU', 'XLRE'
-        }
-
-        # ------------------------------------------------------------
-        # Minimal alias map for top tickers
-        # Expanding this improves context matching
-        # ------------------------------------------------------------
-        self.aliases: Dict[str, List[str]] = {
-            'NVDA': ['nvidia', 'geforce', 'rtx', 'cuda', 'gpu', 'jensen'],
-            'AAPL': ['apple', 'iphone', 'ipad', 'macbook', 'mac'],
-            'MSFT': ['microsoft', 'windows', 'azure', 'xbox', 'nadella'],
-            'META': ['meta', 'facebook', 'instagram', 'whatsapp', 'zuckerberg'],
-            'GOOGL': ['google', 'alphabet', 'chrome', 'gmail', 'android'],
-            'TSLA': ['tesla', 'elon', 'musk', 'model', 'gigafactory'],
-            'AI': ['c3.ai', 'c3ai', 'enterprise ai', 'enterprise-ai'],
-        }
+        self.ticker_context = TICKER_CONTEXT
+        self.context_blacklist = CONTEXT_BLACKLIST
 
     # ==================================================================
-    # Core validation
+    # core validation
     # ==================================================================
     def validate(self, text: str, ticker: str) -> Tuple[bool, float]:
         """
-        Decide whether the extracted ticker is real + return base confidence.
+        decide whether the extracted ticker is real + return base confidence.
         """
 
         if not text or not ticker:
@@ -84,36 +70,45 @@ class EntityLinker:
         text_low = text.lower()
         ticker = ticker.upper()
 
-        # 1. ETF = always valid
+        # 1. etf = always valid
         if ticker in self.etf_whitelist:
             return True, 1.0
 
-        # 2. Blacklist = invalid
+        # 2. blacklist = invalid
         if ticker in self.common_word_blacklist:
             return False, 0.0
         if ticker in MACRO_TERMS or ticker in WSB_SLANG:
             return False, 0.0
+        if ticker in STOCK_DATA_BLACKLIST:
+            return False, 0.0
 
-        # 3. Context-required tickers (AI, GDP, etc.)
+        # 3. context blacklist overrides everything.
+        blacklist_terms = self.context_blacklist.get(ticker, [])
+        if blacklist_terms and any(term in text_low for term in blacklist_terms):
+            return False, 0.0
+
+        # 4. context keywords boost confidence.
+        if self.has_alias_context(text_low, ticker):
+            return True, 0.9
+
+        # 5. configured aliases imply known ticker.
+        if ticker in TICKER_ALIASES:
+            return True, 0.8
+
+        # 3. context-required tickers (AI, GDP, etc.).
         if ticker in CONTEXT_REQUIRED_TICKERS:
             if not self.has_alias_context(text_low, ticker):
                 return False, 0.0
 
-        # 4. Alias/company name match
-        if ticker in self.aliases:
-            for alias in self.aliases[ticker]:
-                if alias in text_low:
-                    return True, 0.9
-
-        # 5. Literal ticker mention ($TSLA or TSLA in text)
+        # 4. literal ticker mention ($TSLA or TSLA in text).
         if ticker.lower() in text_low:
             return True, 0.6
 
-        # Default low-confidence validation (could still be real)
+        # default low-confidence validation (could still be real).
         return True, 0.5
 
     # ==================================================================
-    # Confidence adjustment after extraction
+    # confidence adjustment after extraction
     # ==================================================================
     def boost_confidences(
         self,
@@ -122,10 +117,10 @@ class EntityLinker:
         scores: List[float]
     ) -> Tuple[List[str], List[float]]:
         """
-        Lightweight booster:
+        lightweight booster:
         - Alias match → +0.20
-        - Literal name/ticker in text → +0.10
-        - Very low score → small penalty
+        - literal name/ticker in text → +0.10
+        - very low score → small penalty
         """
 
         if not tickers:
@@ -138,17 +133,17 @@ class EntityLinker:
             tkr_up = tkr.upper()
             new_score = score
 
-            # 1. Boost on literal mention
+            # 1. boost on literal mention.
             if tkr_up.lower() in text_low:
                 new_score = min(new_score + 0.10, 1.0)
 
-            # 2. Boost on alias/company name
-            for alias in self.aliases.get(tkr_up, []):
+            # 2. boost on context keywords.
+            for alias in self.ticker_context.get(tkr_up, []):
                 if alias in text_low:
                     new_score = min(new_score + 0.20, 1.0)
                     break
 
-            # 3. Slight penalty for extremely low confidence
+            # 3. slight penalty for extremely low confidence.
             if new_score < 0.15:
                 new_score = max(new_score - 0.05, 0)
 
@@ -157,14 +152,14 @@ class EntityLinker:
         return tickers, boosted
 
     # ==================================================================
-    # Helpers
+    # helpers
     # ==================================================================
     def has_alias_context(self, text_low: str, ticker: str) -> bool:
         """
-        Require supporting company keywords for ambiguous tickers
+        require supporting company keywords for ambiguous tickers
         like AI, GDP, VAT, etc.
         """
-        for alias in self.aliases.get(ticker, []):
+        for alias in self.ticker_context.get(ticker, []):
             if alias in text_low:
                 return True
         return False

@@ -1,51 +1,62 @@
 # ===========================================================================
-# reddit_collector.py — Stage 1 (Reddit Collection)
-#
-# PURPOSE:
-#   Scrape high-signal Reddit subreddits, extract rich metadata optimized
-#   for market prediction, and save a cleaned CSV for Stage 2.
-#
-# NEW ADDITIONS (PREDICTION-UPGRADED):
-#   • Author metadata:
-#       - author_name, author_karma, author_is_mod, author_created_utc
-#
-#   • Post metadata:
-#       - domain (parsed from URL)
-#       - post_hint (image, link, text, rich:video, etc.)
-#       - is_self_post, is_image_post, is_link_post, is_video_post
-#       - is_crosspost, crosspost_parent, crosspost_subreddit
-#       - awards_count
-#
-#   • Comments metadata:
-#       - top_comments: list of dicts
-#           {
-#             "body": "...",
-#             "score": int,
-#             "author": "...",
-#             "author_flair": "..."
-#           }
-#
-#   • Uses updated subreddit lists from config.py (must-have + optional).
-#
-# ORGANIZATION:
-#   1. Imports + environment
-#   2. RedditDataCollector class
-#      - helpers for media detection, author info, domain parsing
-#      - fetch_subreddit_posts
-#      - fetch_all_subreddits
-#
+# reddit_collector.py — stage 1 (reddit data collection)
 # ===========================================================================
 
+"""
+purpose:
+  scrape high-signal Reddit subreddits, extract rich metadata optimized
+  for market prediction, and save a cleaned CSV to pass onto stage 2.
+
+organization:
+  - imports
+  - reddit data collector class
+    - helper methods:
+      - _select_time_filter
+      - _get_sort_stream
+      - _extract_author_info
+      - _extract_post_media_info
+      - _get_top_comments
+
+    - fetch_subreddit_posts
+    - fetch_all_subreddits
+
+what we get:
+  - author metadata: 
+    - name
+    - karma
+    - is_mod
+    - created_utc
+  - post metadata: 
+    - domain
+    - post_hint
+    - is_self_post
+    - is_image_post
+    - is_link_post
+    - is_video_post
+    - is_crosspost
+    - crosspost_parent
+    - crosspost_subreddit
+    - awards_count
+  - comments metadata: 
+    - body
+    - score
+    - author
+    - flair
+"""
+# imports.
 import os
 import logging
 import pandas as pd
 from praw import Reddit
-from urllib.parse import urlparse
 from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, Style
-from datetime import datetime, timedelta
-from src.utils.path_config import RAW_DIR
+from urllib.parse import urlparse
+from datetime import datetime, timedelta, timezone
+
+
+# local imports.
+from src.utils.path_config import RAW_REDDIT_DIR
 from src.utils.config import (
     SUBREDDITS,
     SORT_METHODS,
@@ -58,16 +69,20 @@ backend_dir = Path(__file__).parent.parent.parent
 env_path = backend_dir / ".env"
 load_dotenv(env_path if env_path.exists() else None)
 
+# setup logging.
 logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
-# RedditDataCollector
+# reddit data collector class
 # ===========================================================================
 class RedditDataCollector:
 
-    def __init__(self, data_dir=None, max_days_lookback=30):
-        self.data_dir = data_dir or (RAW_DIR / "reddit_data")
+    def __init__(self, data_dir=None, max_days_lookback=30, run_date=None, run_id=None):
+        self._run_ts = datetime.now(timezone.utc)
+        self.run_date = run_date or self._run_ts.date().isoformat()
+        self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")
+        self.data_dir = data_dir or self._build_day_dir(RAW_REDDIT_DIR, self.run_date)
         self.max_days_lookback = max_days_lookback
         os.makedirs(self.data_dir, exist_ok=True)
 
@@ -81,13 +96,23 @@ class RedditDataCollector:
 
         # cutoff timestamp for filtering old posts
         self.cutoff_date = datetime.now() - timedelta(days=max_days_lookback)
+        self.last_output_path = None
+
+    @staticmethod
+    def _build_day_dir(root: Path, run_date: str) -> Path:
+        """Return YYYY/MM/DD folder under the given root."""
+        try:
+            year, month, day = run_date.split("-")
+        except ValueError:
+            raise ValueError(f"run_date must be YYYY-MM-DD, got {run_date}")
+        return root / year / month / day
 
     # =======================================================================
-    # HELPER METHODS
+    # helper methods
     # =======================================================================
 
     def _select_time_filter(self):
-        """Choose Reddit time_filter for 'top' sorting."""
+        """choose reddit time_filter for 'top' sort."""
         if self.max_days_lookback <= 7:
             return "week"
         if self.max_days_lookback <= 30:
@@ -95,7 +120,7 @@ class RedditDataCollector:
         return "year"
 
     def _get_sort_stream(self, subreddit, sort, limit):
-        """Return correct listing generator based on chosen sort method."""
+        """return correct listing generator based on chosen sort method."""
         if sort == "hot":
             return subreddit.hot(limit=limit)
         if sort == "new":
@@ -105,10 +130,10 @@ class RedditDataCollector:
         return []
 
     # -----------------------
-    # Author metadata helper
+    # author metadata helper
     # -----------------------
     def _extract_author_info(self, post):
-        """Extract author metadata safely (some posts have deleted authors)."""
+        """extract author metadata safely (some posts have no author)."""
         try:
             author = post.author
             if not author:
@@ -124,12 +149,12 @@ class RedditDataCollector:
             return None, None, None, None
 
     # -----------------------------
-    # URL domain / media type helper
+    # url domain / media type helper
     # -----------------------------
     def _extract_post_media_info(self, post):
         """
-        Classify post type & domain.
-        Uses common Reddit post_hint attributes when available.
+        classify post type & domain.
+        uses common reddit post_hint values when available.
         """
         url = post.url or ""
         domain = urlparse(url).netloc or None
@@ -141,7 +166,7 @@ class RedditDataCollector:
         is_link = (not is_self) and post_hint in ["link", "rich:link"]
         is_video = post_hint in ["hosted:video", "rich:video"]
 
-        # crosspost data (optional)
+        # crosspost data (optional).
         is_cross = hasattr(post, "crosspost_parent_list")
         cross_parent = None
         cross_subreddit = None
@@ -170,12 +195,12 @@ class RedditDataCollector:
         }
 
     # -----------------------------
-    # Enhanced comment extraction
+    # enhanced comment extraction
     # -----------------------------
     def _get_top_comments(self, post, max_count=5):
         """
-        Extract top comments with score & author info.
-        Returns list of dicts.
+        extract top comments with score & author info.
+        return list of dicts.
         """
         try:
             post.comments.replace_more(limit=0)
@@ -197,12 +222,12 @@ class RedditDataCollector:
         return comments_out
 
     # =======================================================================
-    # FETCH POSTS FROM ONE SUBREDDIT
+    # fetch posts from one subreddit
     # =======================================================================
     def fetch_subreddit_posts(self, subreddit_name, limit=100, sort="hot"):
         """
-        Fetch posts from a single subreddit using a specific sort method.
-        Returns a DataFrame or None.
+        fetch posts from a single subreddit using a specific sort method.
+        return a DataFrame or None.
         """
         try:
             subreddit = self.reddit.subreddit(subreddit_name)
@@ -214,14 +239,14 @@ class RedditDataCollector:
                 if created < self.cutoff_date:
                     continue
 
-                # author metadata
+                # author metadata.
                 author_name, author_karma, author_is_mod, author_created = \
                     self._extract_author_info(post)
 
-                # post media metadata
+                # post media metadata.
                 media_info = self._extract_post_media_info(post)
 
-                # build structured row
+                # build structured row.
                 out_rows.append({
                     "id": post.id,
                     "title": post.title,
@@ -233,16 +258,16 @@ class RedditDataCollector:
                     "subreddit": subreddit_name,
                     "flair": post.link_flair_text,
 
-                    # author metadata
+                    # author metadata.
                     "author_name": author_name,
                     "author_karma": author_karma,
                     "author_is_mod": author_is_mod,
                     "author_created_utc": author_created,
 
-                    # media metadata
+                    # media metadata.
                     **media_info,
 
-                    # enhanced comments
+                    # enhanced comments.
                     "top_comments": self._get_top_comments(post),
                 })
 
@@ -253,10 +278,10 @@ class RedditDataCollector:
             return None
 
     # =======================================================================
-    # FETCH ALL SUBREDDITS + SAVE CSV
+    # fetch all subreddits + save CSV
     # =======================================================================
     def fetch_all_subreddits(self, limit=50, test_mode=False):
-        print(f"{Fore.CYAN}===== Stage 1: Reddit Data Collection ====={Style.RESET_ALL}")
+        print(f"{Fore.CYAN}===== stage 1: reddit data collection ====={Style.RESET_ALL}")
         print(f"lookback={self.max_days_lookback} days | limit={limit}\n")
 
         subreddits = TEST_SUBREDDITS if test_mode else SUBREDDITS
@@ -293,10 +318,12 @@ class RedditDataCollector:
             .sort_values("created_utc", ascending=False)
         )
 
-        filename = f"reddit_posts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        final.to_csv(self.data_dir / filename, index=False)
+        filename = f"reddit_posts_{self.run_id}.csv"
+        output_path = self.data_dir / filename
+        final.to_csv(output_path, index=False)
+        self.last_output_path = output_path
 
         print(f"{Fore.GREEN}✓ collected {len(final)} total posts{Style.RESET_ALL}")
-        print(f"  saved to: {filename}\n")
+        print(f"  saved to: {output_path}\n")
 
-        return final
+        return output_path

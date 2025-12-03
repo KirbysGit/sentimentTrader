@@ -1,4 +1,26 @@
-"""Standalone sentiment scoring helper for Reddit posts."""
+"""
+purpose:
+  provide a tiny, dependency-free sentiment helper for Stage 2 so we can
+  tag every reddit post with a quick polarity score.
+
+what this does:
+  - tokenizes cleaned post text
+  - counts occurrences of finance slang stored in config-level lexicons
+  - returns (positive hits - negative hits) as a lightweight score
+
+how it fits:
+  RedditDataProcessor imports this class, feeds cleaned text, and
+  stores the returned float alongside tickers + engagement.
+  Later we can swap in FinBERT without touching the processor API.
+
+dependencies:
+  - `src.utils.config` for the positive/negative lexicon sets
+"""
+
+from src.utils.config import (
+    POSITIVE_SENTIMENT_WORDS,
+    NEGATIVE_SENTIMENT_WORDS,
+)
 
 
 class SentimentScorer:
@@ -8,19 +30,8 @@ class SentimentScorer:
     """
 
     def __init__(self):
-        self.positive = {
-            "up", "bull", "bullish", "gain", "green",
-            "beat", "pump", "moon", "mooning",
-            "strong", "win", "positive", "profit",
-            "surge", "soar", "rocket", "pump"
-        }
-
-        self.negative = {
-            "down", "bear", "bearish", "loss",
-            "dump", "crash", "bad", "miss",
-            "weak", "negative", "red", "selloff",
-            "plunge", "tank", "bleed"
-        }
+        self.positive = set(POSITIVE_SENTIMENT_WORDS)
+        self.negative = set(NEGATIVE_SENTIMENT_WORDS)
 
     def score(self, text: str) -> float:
         """
