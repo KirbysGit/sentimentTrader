@@ -9,7 +9,7 @@ what this does:
   - returns (positive hits - negative hits) as a lightweight score
 
 how it fits:
-  RedditDataProcessor imports this class, feeds cleaned text, and
+  `RedditDataProcessor` imports this class, feeds cleaned text, and
   stores the returned float alongside tickers + engagement.
   Later we can swap in FinBERT without touching the processor API.
 

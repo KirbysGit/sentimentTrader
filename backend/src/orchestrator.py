@@ -54,7 +54,7 @@ class PipelineOrchestrator:
             if success:
                 self.raw_output_paths = [output_path]
             return success
-
+            
         except Exception as e:
             logger.error(f"collection error: {e}")
             print(f"{Fore.RED}✗ collection error: {e}{Style.RESET_ALL}")
@@ -73,7 +73,7 @@ class PipelineOrchestrator:
             df = processor.process()                                # <— only method now
 
             return df is not None and not df.empty
-
+            
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -101,7 +101,7 @@ class PipelineOrchestrator:
         if not processed_file.exists():
             print(Fore.RED + "✗ No ticker_daily_metrics.csv found. Cannot collect stock data." + Style.RESET_ALL)
             return False
-
+            
         import pandas as pd
         df = pd.read_csv(processed_file)
         if df.empty:
@@ -154,12 +154,12 @@ def main():
             REDDIT_POSTS_PER_SUBREDDIT
         )
 
-        logging.basicConfig(
+    logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        orchestrator = PipelineOrchestrator()
+    )
+    
+    orchestrator = PipelineOrchestrator()
 
         # ---------------------------
         # Stage 1: Collect Reddit
@@ -192,4 +192,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 

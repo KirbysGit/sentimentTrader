@@ -93,6 +93,9 @@ WSB_FINANCE_BLACKLIST = {
     "COVID", "HSA", "IRA", "LTCG",
     "GPT", "API", "AWS", "FSD", "GEX", "ZIRP", "DCA", "EMH", "AGI", "ASI", "MAG",
     "HCOL", "ADV", "LLC", "PM",
+    "EBIT",
+    "AOV", "GMV", "LTV", "PLR",
+    "ADHD", "CHAD", "GOD", "ZERO",
 }
 
 # Symbols we never want heading into stock collection (non-equity, macro)
@@ -105,12 +108,14 @@ STOCK_DATA_BLACKLIST = {
     "NYSE", "FTSE", "CNBC",
     "JATEC", "LBNL", "OPAI",
     "OPEN",
+    "BMNR",
+    "EBIT",
 }
 
 # extra stopwords removed after stage 2 to avoid false positives
 FINAL_STAGE_STOPWORDS = {
     "YES", "RE", "PART", "MODE", "MINE", "JUICY", "STILL", "SETUP", "RJ", "MATH",
-    "OPEN",
+    "OPEN", "ZERO", "GOD", "BIBLE", "DID",
 }
 
 # subreddit to ticker mapping (all lowercase keys)
@@ -160,7 +165,7 @@ NEGATIVE_SENTIMENT_WORDS = {
 
 # common words that might be mistaken for tickers
 COMMON_WORDS = {
-    'THE', 'AND', 'FOR', 'ARE', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
+    'THE', 'AND', 'FOR', 'ARE', 'OF', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
     'FROM', 'THIS', 'THAT', 'WITH', 'WHICH', 'WHEN', 'WHERE', 'WHAT', 'WHY', 'HOW', 'WHO',
     'CAN', 'MAN', 'POST', 'LIVE', 'HAS', 'HAD', 'WAS', 'WERE', 'BEEN', 'BEING', 'HAVE', 'HAS',
     'WILL', 'WOULD', 'SHALL', 'SHOULD', 'MAY', 'MIGHT', 'MUST', 'COULD', 'SHOULD', 'WOULD',
@@ -188,7 +193,8 @@ ETF_CATEGORIES = {
         'GLD', 'SLV', 'USO', 'UNG', 'PHYS', 'URA'
     },
     'BOND': {
-        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND', 'VHYG', 'TIPS'
+        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND', 'VHYG', 'TIPS',
+        'FLOT', 'SGOV',
     },
     'INTERNATIONAL': {
         'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT'
@@ -217,6 +223,7 @@ WELL_KNOWN_TICKERS = {
     'UUUU', 'SMR', 'OKLO', 'RKLB', 'ASTS', 'ACHR',
     'SOND', 'ANF', 'KSS', 'LSEG',
     'ALAB', 'IREN',
+    'ESNT', 'PATH', 'CRWD',
 }
 
 # negative context patterns that invalidate ticker matches

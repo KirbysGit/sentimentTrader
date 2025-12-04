@@ -64,6 +64,12 @@ TICKER_CONTEXT = {
     "URA": ["uranium etf", "miners"],
     "ALAB": ["astera labs", "cxl", "ai networking", "pcie"],
     "IREN": ["iris energy", "bitcoin miner", "data center", "ai infrastructure"],
+    "CRWD": ["crowdstrike", "endpoint", "falcon", "cybersecurity", "edr", "xdr", "threat hunting"],
+    "ESNT": ["essent", "mortgage insurance", "private mortgage", "bermuda", "home loans"],
+    "PATH": ["uipath", "automation", "rpa", "robotic process automation", "maestro"],
+    "FLOT": ["floating rate", "bond etf", "treasury", "investment grade", "short term bond"],
+    "SGOV": ["t bill", "treasury etf", "short term treasury", "government bond", "cash alternative"],
+    "BMNR": ["ethereum", "validator network", "staking", "tokenization"],
 }
 
 # Keywords that strongly indicate the uppercase token is NOT a ticker.
@@ -78,6 +84,9 @@ CONTEXT_BLACKLIST = {
     "NYSE": ["exchange", "trading floor", "listing", "market open"],
     "FTSE": ["index", "ftse 100", "ftse 250"],
     "CNBC": ["tv", "anchor", "interview", "network"],
-    "ADP": ["jobs report", "employment report"],
+    "ADP": [
+        "jobs report", "employment report", "labor market", "private employers",
+        "payroll data", "adp numbers", "jobs data"
+    ],
 }
 

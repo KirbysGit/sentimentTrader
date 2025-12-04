@@ -5,7 +5,7 @@
 # mode selection
 # ============================================================================
 # set to True for quick testing, False for full production collection
-TEST_MODE = True
+TEST_MODE = False
 
 # ============================================================================
 # test mode settings (fast, minimal data for development)
