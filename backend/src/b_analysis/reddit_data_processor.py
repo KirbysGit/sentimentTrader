@@ -34,6 +34,7 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone
 import pandas as pd
+import numpy as np
 from colorama import Fore, Style
 from typing import List, Iterable, Optional
 
@@ -56,6 +57,7 @@ from src.utils.config import (
     STRONG_FINANCE_WORDS,
     WEAK_FINANCE_WORDS,
 )
+from src.utils.ticker_aliases import get_canonical_alias_map
 
 
 class RedditDataProcessor:
@@ -95,6 +97,7 @@ class RedditDataProcessor:
         self.finance_keywords = {
             kw.lower() for kw in (STRONG_FINANCE_WORDS | WEAK_FINANCE_WORDS)
         }
+        self.canonical_alias_map = get_canonical_alias_map()
 
         # optional seen-post registry hooks (disabled for now)
         self.enable_seen_registry = False
@@ -155,6 +158,13 @@ class RedditDataProcessor:
         text = re.sub(r"\s{2,}", " ", text).strip()
         return text
 
+    def _canonicalize_ticker(self, ticker: str) -> str:
+        """normalize a ticker using the alias map, defaulting to uppercase original."""
+        ticker_up = (ticker or "").upper()
+        if not ticker_up:
+            return ticker_up
+        return self.canonical_alias_map.get(ticker_up, ticker_up)
+
     # ------------------------------------------------------------
     # financial relevance heuristic
     # ------------------------------------------------------------
@@ -170,49 +180,96 @@ class RedditDataProcessor:
     # core processing
     # ------------------------------------------------------------
     def _build_daily_ticker_metrics(self, df: pd.DataFrame) -> None:
-        """aggregate per-ticker metrics per day and persist to CSV."""
-        
+        """aggregate per-ticker metrics per day and upsert into the master CSV."""
+
         if "created_utc" not in df.columns:
             return
 
         df = df.copy()
         df["date"] = pd.to_datetime(df["created_utc"]).dt.date
 
-        # build daily ticker metrics.
         rows = []
         for _, row in df.iterrows():
-            tickers = row.get("tickers", [])
-            scores = row.get("ticker_scores", [])
+            tickers = row.get("tickers", []) or []
+            scores = row.get("ticker_scores", []) or []
+            if not tickers or not scores:
+                continue
+
+            engagement = float(row.get("engagement", 0.0) or 0.0)
+            sentiment = float(row.get("sentiment", 0.0) or 0.0)
+            is_relevant = bool(row.get("is_relevant", False))
+            if len(tickers) != len(scores):
+                min_len = min(len(tickers), len(scores))
+                tickers = tickers[:min_len]
+                scores = scores[:min_len]
+
             for ticker, score in zip(tickers, scores):
-                rows.append({
-                    "date": row["date"],
-                    "ticker": ticker,
-                    "confidence": score,
-                    "engagement": row["engagement"],
-                    "sentiment": row["sentiment"],
-                    "is_relevant": row["is_relevant"],
-                })
+                rows.append(
+                    {
+                        "date": row["date"],
+                        "ticker": ticker,
+                        "confidence": float(score),
+                        "engagement": engagement,
+                        "sentiment": sentiment,
+                        "is_relevant": is_relevant,
+                    }
+                )
 
         if not rows:
             return
 
-        # aggregate daily ticker metrics.
         daily = pd.DataFrame(rows)
-        daily_agg = daily.groupby(["date", "ticker"]).agg({
-            "confidence": "mean",
-            "engagement": "sum",
-            "sentiment": "mean",
-            "is_relevant": "sum",
-        }).reset_index()
+        daily["is_relevant_int"] = daily["is_relevant"].astype(int)
+        daily["sentiment_x_eng"] = daily["sentiment"] * daily["engagement"]
 
-        # save daily ticker metrics to CSV.
+        grouped = daily.groupby(["date", "ticker"], as_index=False)
+        daily_agg = grouped.agg(
+            num_mentions=("sentiment", "size"),
+            mean_confidence=("confidence", "mean"),
+            max_confidence=("confidence", "max"),
+            total_engagement=("engagement", "sum"),
+            mean_engagement=("engagement", "mean"),
+            mean_sentiment=("sentiment", "mean"),
+            sentiment_std=("sentiment", "std"),
+            sentiment_x_eng_sum=("sentiment_x_eng", "sum"),
+            relevant_count=("is_relevant_int", "sum"),
+        )
+
+        daily_agg["sentiment_std"] = daily_agg["sentiment_std"].fillna(0.0)
+        daily_agg["eng_weighted_sentiment"] = daily_agg["sentiment_x_eng_sum"] / daily_agg[
+            "total_engagement"
+        ].replace(0, np.nan)
+        daily_agg["eng_weighted_sentiment"] = daily_agg["eng_weighted_sentiment"].fillna(0.0)
+        daily_agg["relevant_ratio"] = daily_agg["relevant_count"] / daily_agg["num_mentions"].clip(
+            lower=1
+        )
+        daily_agg["log_total_engagement"] = np.log1p(
+            daily_agg["total_engagement"].clip(lower=0.0)
+        )
+        daily_agg["log_num_mentions"] = np.log1p(daily_agg["num_mentions"].clip(lower=0))
+        daily_agg["run_date"] = getattr(self, "run_date", None)
+        daily_agg["run_id"] = getattr(self, "run_id", None)
+        daily_agg = daily_agg.drop(columns=["sentiment_x_eng_sum"])
+
         output = self.metrics_path
         output.parent.mkdir(parents=True, exist_ok=True)
-        daily_agg["run_date"] = self.run_date
-        daily_agg["run_id"] = self.run_id
-        header = not output.exists()
-        daily_agg.to_csv(output, mode="a", header=header, index=False)
-        print(f"{Fore.GREEN}✓ appended daily metrics → {self._format_path(output)}{Style.RESET_ALL}")
+
+        if output.exists():
+            try:
+                existing = pd.read_csv(output)
+            except Exception:
+                existing = pd.DataFrame()
+        else:
+            existing = pd.DataFrame()
+
+        combined = pd.concat([existing, daily_agg], ignore_index=True)
+        if not combined.empty:
+            combined["date"] = pd.to_datetime(combined["date"]).dt.date
+            combined = combined.drop_duplicates(subset=["date", "ticker"], keep="last")
+            combined = combined.sort_values(["date", "ticker"])
+
+        combined.to_csv(output, index=False)
+        print(f"{Fore.GREEN}✓ wrote daily metrics → {self._format_path(output)}{Style.RESET_ALL}")
 
     # ------------------------------------------------------------
 
@@ -455,7 +512,7 @@ class RedditDataProcessor:
                 if self._allow_final_ticker(ticker)
             ]
             if filtered_pairs:
-                tks = [t for t, _ in filtered_pairs]
+                tks = [self._canonicalize_ticker(t) for t, _ in filtered_pairs]
                 scs = [s for _, s in filtered_pairs]
             else:
                 tks, scs = [], []

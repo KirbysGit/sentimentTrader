@@ -93,9 +93,11 @@ WSB_FINANCE_BLACKLIST = {
     "COVID", "HSA", "IRA", "LTCG",
     "GPT", "API", "AWS", "FSD", "GEX", "ZIRP", "DCA", "EMH", "AGI", "ASI", "MAG",
     "HCOL", "ADV", "LLC", "PM",
+    "HYSA",
     "EBIT",
     "AOV", "GMV", "LTV", "PLR",
-    "ADHD", "CHAD", "GOD", "ZERO",
+    "ADHD", "CHAD", "GOD", "ZERO", "TILTS",
+    "STOCK",
 }
 
 # Symbols we never want heading into stock collection (non-equity, macro)
@@ -108,14 +110,17 @@ STOCK_DATA_BLACKLIST = {
     "NYSE", "FTSE", "CNBC",
     "JATEC", "LBNL", "OPAI",
     "OPEN",
+    "HYSA",
     "BMNR",
     "EBIT",
+    "TILTS",
+    "STOCK",
 }
 
 # extra stopwords removed after stage 2 to avoid false positives
 FINAL_STAGE_STOPWORDS = {
     "YES", "RE", "PART", "MODE", "MINE", "JUICY", "STILL", "SETUP", "RJ", "MATH",
-    "OPEN", "ZERO", "GOD", "BIBLE", "DID",
+    "OPEN", "ZERO", "GOD", "BIBLE", "DID", "HYSA", "STOCK",
 }
 
 # subreddit to ticker mapping (all lowercase keys)
@@ -194,7 +199,7 @@ ETF_CATEGORIES = {
     },
     'BOND': {
         'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND', 'VHYG', 'TIPS',
-        'FLOT', 'SGOV',
+        'FLOT', 'SGOV', 'VGSH',
     },
     'INTERNATIONAL': {
         'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT'
@@ -224,6 +229,7 @@ WELL_KNOWN_TICKERS = {
     'SOND', 'ANF', 'KSS', 'LSEG',
     'ALAB', 'IREN',
     'ESNT', 'PATH', 'CRWD',
+    'DLTR', 'AVGO', 'NEE', 'PLD',
 }
 
 # negative context patterns that invalidate ticker matches

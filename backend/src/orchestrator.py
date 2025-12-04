@@ -149,46 +149,46 @@ class PipelineOrchestrator:
 # CLI entrypoint
 # ------------------------------------------------------------
 def main():
-        from src.utils.pipeline_config import (
-            REDDIT_DAYS_LOOKBACK, 
-            REDDIT_POSTS_PER_SUBREDDIT
-        )
+    from src.utils.pipeline_config import (
+        REDDIT_DAYS_LOOKBACK,
+        REDDIT_POSTS_PER_SUBREDDIT,
+    )
 
     logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    
+
     orchestrator = PipelineOrchestrator()
 
-        # ---------------------------
-        # Stage 1: Collect Reddit
-        # ---------------------------
-        if orchestrator.collect_reddit_data(
-            days=REDDIT_DAYS_LOOKBACK,
-            limit=REDDIT_POSTS_PER_SUBREDDIT
-        ):
-            print(f"{Fore.GREEN}✓ Stage 1 completed successfully{Style.RESET_ALL}")
-        else:
-            print(f"{Fore.RED}✗ Stage 1 failed{Style.RESET_ALL}")
-            return
+    # ---------------------------
+    # Stage 1: Collect Reddit
+    # ---------------------------
+    if orchestrator.collect_reddit_data(
+        days=REDDIT_DAYS_LOOKBACK,
+        limit=REDDIT_POSTS_PER_SUBREDDIT,
+    ):
+        print(f"{Fore.GREEN}✓ Stage 1 completed successfully{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}✗ Stage 1 failed{Style.RESET_ALL}")
+        return
 
-        # ---------------------------
-        # Stage 2: Process Reddit
-        # ---------------------------
-        if orchestrator.process_reddit_data():
-            print(f"{Fore.GREEN}✓ Stage 2 completed successfully{Style.RESET_ALL}")
-        else:
-            print(f"{Fore.RED}✗ Stage 2 failed{Style.RESET_ALL}")
+    # ---------------------------
+    # Stage 2: Process Reddit
+    # ---------------------------
+    if orchestrator.process_reddit_data():
+        print(f"{Fore.GREEN}✓ Stage 2 completed successfully{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}✗ Stage 2 failed{Style.RESET_ALL}")
 
-        # ---------------------------
-        # Stage 3: Stock Data
-        # ---------------------------
-        if orchestrator.collect_stock_data(lookback_days=90):
-            print(f"{Fore.GREEN}✓ Stage 3 completed successfully{Style.RESET_ALL}")
-        else:
-            print(f"{Fore.RED}✗ Stage 3 failed{Style.RESET_ALL}")
-            return
+    # ---------------------------
+    # Stage 3: Stock Data
+    # ---------------------------
+    if orchestrator.collect_stock_data(lookback_days=90):
+        print(f"{Fore.GREEN}✓ Stage 3 completed successfully{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}✗ Stage 3 failed{Style.RESET_ALL}")
+        return
 
 
 if __name__ == "__main__":

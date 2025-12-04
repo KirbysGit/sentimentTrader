@@ -70,6 +70,11 @@ TICKER_CONTEXT = {
     "FLOT": ["floating rate", "bond etf", "treasury", "investment grade", "short term bond"],
     "SGOV": ["t bill", "treasury etf", "short term treasury", "government bond", "cash alternative"],
     "BMNR": ["ethereum", "validator network", "staking", "tokenization"],
+    "DLTR": ["dollar tree", "discount retailer", "value chain"],
+    "AVGO": ["broadcom", "semiconductor", "chips", "ai accelerators"],
+    "NEE": ["nextera", "utility", "renewable energy", "florida power", "fpl"],
+    "PLD": ["prologis", "reit", "logistics", "warehouses"],
+    "VGSH": ["vanguard", "short term treasury", "treasury etf", "bond fund"],
 }
 
 # Keywords that strongly indicate the uppercase token is NOT a ticker.
