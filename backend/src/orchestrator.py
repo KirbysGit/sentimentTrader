@@ -32,7 +32,7 @@ class PipelineOrchestrator:
         self.run_date = self.run_ts.date().isoformat()
         self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")
         self.raw_output_paths = []
-
+            
     # ------------------------------------------------------------
     # Stage 1 — Reddit Collection
     # ------------------------------------------------------------
@@ -158,7 +158,7 @@ def main():
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-
+    
     orchestrator = PipelineOrchestrator()
 
     # ---------------------------

@@ -30,22 +30,21 @@ future expansion:
 
 # imports.
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 
 # local imports.
 from src.utils.config import (
     MACRO_TERMS,
     WSB_SLANG,
-    WSB_FINANCE_BLACKLIST,
     CONTEXT_REQUIRED_TICKERS,
     VALID_ETFS,
     WELL_KNOWN_TICKERS,
-    STOCK_DATA_BLACKLIST,
     STRONG_FINANCE_WORDS,
     WEAK_FINANCE_WORDS,
 )
 from src.utils.ticker_context_config import TICKER_CONTEXT
+from src.utils.ticker_filters import classify_token
 from .entity_linker import EntityLinker
 
 
@@ -61,7 +60,7 @@ class TickerExtractor:
         self.entity_linker = EntityLinker()
 
     # ------------------------------------------------------------------
-    def extract_tickers(self, text: str) -> Tuple[List[str], List[float], List[dict]]:
+    def extract_tickers(self, text: str) -> Tuple[List[str], List[float], List[dict], List[Dict[str, Any]]]:
         """
         extract and validate tickers from text.
 
@@ -70,7 +69,7 @@ class TickerExtractor:
             scores:  [0.9, 0.5]    <-- aligned with tickers
         """
         if not text:
-            return [], [], []
+            return [], [], [], []
 
         # extract tickers.
         tickers = set()
@@ -84,16 +83,22 @@ class TickerExtractor:
             tickers.add(match.upper())
 
         validated = []
-        scores = []
+        base_scores = []
+        evidence_payload: List[Dict[str, Any]] = []
 
         # ---------- 3. validate via minimal entity linker ----------
-        filtered, review_items = self._filter_noise_tickers(sorted(tickers), text)
+        filtered, review_items, extractor_meta = self._filter_noise_tickers(sorted(tickers), text)
 
         for ticker in filtered:
-            is_valid, conf = self.entity_linker.validate(text, ticker)
+            is_valid, conf, linker_meta = self.entity_linker.validate(text, ticker)
             if is_valid:
                 validated.append(ticker)
-                scores.append(float(conf))  # ensure numeric
+                base_scores.append(float(conf))  # ensure numeric
+                evidence_payload.append({
+                    "ticker": ticker,
+                    "extractor": extractor_meta.get(ticker, {}),
+                    "linker": linker_meta or {},
+                })
             else:
                 review_items.append(
                     self._make_review_entry(
@@ -104,15 +109,32 @@ class TickerExtractor:
                     )
                 )
 
-        return validated, scores, review_items
+        if not validated:
+            return [], [], review_items, []
+
+        # track pre-boost for evidence
+        pre_boost_scores = list(base_scores)
+        validated, boosted, boost_details = self.entity_linker.boost_confidences(
+            text,
+            validated,
+            base_scores,
+        )
+
+        for idx, evidence in enumerate(evidence_payload):
+            evidence["pre_boost_score"] = pre_boost_scores[idx]
+            evidence["boosted_score"] = boosted[idx]
+            evidence["boosts"] = boost_details[idx] if idx < len(boost_details) else []
+
+        return validated, boosted, review_items, evidence_payload
 
     # ------------------------------------------------------------------
-    def _filter_noise_tickers(self, tickers: List[str], text: str) -> Tuple[List[str], List[dict]]:
+    def _filter_noise_tickers(self, tickers: List[str], text: str) -> Tuple[List[str], List[dict], Dict[str, Dict[str, Any]]]:
         """advanced filtering: blacklist, alias checks, ETF checks, and local context."""
         clean = []
         review = []
         text_low = text.lower() if text else ""
         words = re.findall(r"[a-z0-9$]+", text_low)
+        evidence: Dict[str, Dict[str, Any]] = {}
 
         fin_context_words = {
             w.lower() for w in (STRONG_FINANCE_WORDS | WEAK_FINANCE_WORDS)
@@ -120,12 +142,20 @@ class TickerExtractor:
 
         # iterate through each ticker.
         for ticker in tickers:
+            classification = classify_token(ticker)
+            if classification == "blocked":
+                review.append(self._make_review_entry(ticker, "blacklist_filter", text))
+                continue
+            if classification == "unknown_candidate":
+                review.append(self._make_review_entry(ticker, "unknown_symbol", text))
+                continue
+            if classification == "ignored":
+                continue
+            ticker_lower = ticker.lower()
             # check if the ticker is in the macro terms, WSB slang, WSB finance blacklist, or stock data blacklist.
             if (
                 ticker in MACRO_TERMS
                 or ticker in WSB_SLANG
-                or ticker in WSB_FINANCE_BLACKLIST
-                or ticker in STOCK_DATA_BLACKLIST
             ):
                 review.append(self._make_review_entry(ticker, "blacklist_filter", text))
                 continue
@@ -138,14 +168,37 @@ class TickerExtractor:
                 review.append(self._make_review_entry(ticker, "timestamp_et", text))
                 continue
 
+            positions = [i for i, w in enumerate(words) if w == ticker_lower]
+            if not positions:
+                review.append(self._make_review_entry(ticker, "not_in_text", text))
+                continue
+
+            context_tokens = self._collect_context_tokens(words, positions)
+            context_snippet = self._extract_context_snippet(text, ticker, window=160)
+            entry_meta = {
+                "accept_reason": None,
+                "context_tokens": context_tokens,
+                "context_snippet": context_snippet,
+                "finance_terms": [],
+                "context_terms": [],
+                "peer_hit": False,
+                "peer_ticker": None,
+            }
+
             # check if the ticker is in the well known tickers or valid ETFs.
             if ticker in WELL_KNOWN_TICKERS or ticker in VALID_ETFS:
+                entry_meta["accept_reason"] = "well_known_ticker"
+                evidence[ticker] = entry_meta
                 clean.append(ticker)
                 continue
 
             # check if the ticker is in the ticker context.
             context_terms = TICKER_CONTEXT.get(ticker, [])
-            if context_terms and any(term in text_low for term in context_terms):
+            matched_terms = [term for term in context_terms if term in text_low] if context_terms else []
+            if matched_terms:
+                entry_meta["context_terms"] = matched_terms
+                entry_meta["accept_reason"] = "context_keyword"
+                evidence[ticker] = entry_meta
                 clean.append(ticker)
                 continue
 
@@ -154,30 +207,58 @@ class TickerExtractor:
                 if not self.entity_linker.has_alias_context(text_low, ticker):
                     review.append(self._make_review_entry(ticker, "missing_context_keyword", text))
                     continue
-
-            # check if the ticker is in the text.
-            positions = [i for i, w in enumerate(words) if w == ticker.lower()]
-            if not positions:
-                review.append(self._make_review_entry(ticker, "not_in_text", text))
-                continue
+                entry_meta["context_terms"] = TICKER_CONTEXT.get(ticker, [])
 
             # check if the ticker has strong financial context.
             strong_context_found = False
+            finance_hits = set()
             for pos in positions:
-                window = words[max(0, pos - 5): pos + 6]
-                if any(w in fin_context_words for w in window):
+                window = words[max(0, pos - 8): pos + 9]
+                window_hits = {w for w in window if w in fin_context_words}
+                if window_hits:
                     strong_context_found = True
+                    finance_hits.update(window_hits)
                     break
 
             # if the ticker does not have strong financial context, add it to the review.
             if not strong_context_found:
+                peer_hit, peer_symbol = self._has_peer_ticker_context(ticker, tickers, words, positions)
+                if peer_hit:
+                    entry_meta["peer_hit"] = True
+                    entry_meta["peer_ticker"] = peer_symbol
+                    entry_meta["accept_reason"] = "peer_ticker_context"
+                    evidence[ticker] = entry_meta
+                    clean.append(ticker)
+                    continue
                 review.append(self._make_review_entry(ticker, "no_financial_context", text))
                 continue
 
+            entry_meta["finance_terms"] = sorted(finance_hits)
+            entry_meta["accept_reason"] = entry_meta.get("accept_reason") or "finance_keywords"
+            evidence[ticker] = entry_meta
             # add the ticker to the clean list.
             clean.append(ticker)
 
-        return clean, review
+        return clean, review, evidence
+
+    def _has_peer_ticker_context(
+        self,
+        ticker: str,
+        all_tickers: List[str],
+        words: List[str],
+        positions: List[int],
+        radius: int = 10,
+    ) -> Tuple[bool, str]:
+        """Check if nearby well-known tickers provide implicit context."""
+        if not positions:
+            return False, ""
+        for peer in all_tickers:
+            if peer == ticker or peer not in WELL_KNOWN_TICKERS:
+                continue
+            peer_positions = [i for i, w in enumerate(words) if w == peer.lower()]
+            if any(abs(pos - peer_pos) <= radius for pos in positions for peer_pos in peer_positions):
+                return True, peer
+        return False, ""
 
     # ------------------------------------------------------------------
     def _make_review_entry(self, ticker: str, reason: str, text: str = "", extra: dict = None) -> dict:
@@ -204,3 +285,15 @@ class TickerExtractor:
         end = min(len(text), idx + window // 2)
         snippet = text[start:end].strip()
         return snippet
+
+    @staticmethod
+    def _collect_context_tokens(words: List[str], positions: List[int], radius: int = 8, max_tokens: int = 40) -> List[str]:
+        """Collect a small window of tokens for evidence."""
+        tokens: List[str] = []
+        for pos in positions:
+            start = max(0, pos - radius)
+            end = min(len(words), pos + radius + 1)
+            tokens.extend(words[start:end])
+            if len(tokens) >= max_tokens:
+                break
+        return tokens[:max_tokens]

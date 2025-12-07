@@ -87,17 +87,21 @@ WSB_FINANCE_BLACKLIST = {
     "WTF", "YOLO", "YOY", "YCC",
     # pipeline-observed false tickers
     "BNPL", "CEO", "FDA", "WSB", "USD", "NTM",
+    "OTCPK", "OTCQB", "OTC",
     # additional review false positives
     "US", "USA", "UAE", "EUR", "GBP", "JPY",
     "MIT", "WSJ", "CNBC", "NYT", "BBC", "NCIA",
     "COVID", "HSA", "IRA", "LTCG",
     "GPT", "API", "AWS", "FSD", "GEX", "ZIRP", "DCA", "EMH", "AGI", "ASI", "MAG",
-    "HCOL", "ADV", "LLC", "PM",
+    "HCOL", "ADV", "LLC", "PM", "OF", "SINCE",
     "HYSA",
     "EBIT",
-    "AOV", "GMV", "LTV", "PLR",
+    "AOV", "GMV", "LTV", "PLR", "CAPEX",
     "ADHD", "CHAD", "GOD", "ZERO", "TILTS",
-    "STOCK",
+    "STOCK", "HOT",
+    "THREE", "WEEKS", "MINUS", "CARE", "NATO", "ANTH",
+    "MAANG", "ROTH", "ESPN", "HBO", "FAQ", "FBI", "GFC", "ATP",
+    "ESOP", "BS", "III", "PS", "LARGE"
 }
 
 # Symbols we never want heading into stock collection (non-equity, macro)
@@ -115,6 +119,7 @@ STOCK_DATA_BLACKLIST = {
     "EBIT",
     "TILTS",
     "STOCK",
+    "MAANG", "ROTH", "ESPN", "HBO",
 }
 
 # extra stopwords removed after stage 2 to avoid false positives
@@ -141,7 +146,9 @@ STRONG_FINANCE_WORDS = {
     'trading', 'investor', 'bullish', 'bearish', '$', 'calls', 'puts', 'options',
     'portfolio', 'shareholders', 'eps', 'pe ratio', 'market share', 'guidance',
     'analyst', 'upgrade', 'downgrade', 'price target', 'short interest', 'float',
-    'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition'
+    'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition',
+    'sold', 'selling', 'dumped', 'dumping', 'trim', 'trimmed', 'bagged', 'bagging',
+    'positioned', 'positions', 'averaged', 'scaling'
 }
 
 # weak financial context words (lower confidence)
@@ -205,12 +212,20 @@ ETF_CATEGORIES = {
         'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT'
     },
     'CRYPTO': {
-        'IBIT', 'BITB'
+        'IBIT', 'BITB', 'BTCI'
     }
 }
 
 # flatten etf list for quick lookup
 VALID_ETFS = {etf for category in ETF_CATEGORIES.values() for etf in category}
+
+# extra allow/block lists that sit outside exchange universes
+EXTRA_ALWAYS_ALLOW = {
+    "BTC",
+    "ETH",
+    "SPX",
+    "GOLD",
+}
 
 # well-known stock tickers
 WELL_KNOWN_TICKERS = {
@@ -229,7 +244,9 @@ WELL_KNOWN_TICKERS = {
     'SOND', 'ANF', 'KSS', 'LSEG',
     'ALAB', 'IREN',
     'ESNT', 'PATH', 'CRWD',
-    'DLTR', 'AVGO', 'NEE', 'PLD',
+    'DLTR', 'AVGO', 'NEE', 'PLD', 'LLY', 'BUD', 'NQ', 'DASH',
+    # newly promoted from review queue
+    'WBD', 'BABA', 'BILI', 'WB', 'PDD', 'TAL', 'EDU', 'EDIT',
 }
 
 # negative context patterns that invalidate ticker matches
@@ -246,7 +263,8 @@ NEGATIVE_CONTEXT_PATTERNS = {
     'MOON': ['to the moon', 'moon shot', 'moon boy', 'moon mission'],
     'PUMP': ['pump and dump', 'pump scheme', 'pump group'],
     'HOLD': ['hold on', 'hold up', 'hold tight', 'hold steady'],
-    'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank']
+    'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank'],
+    'DASH': [' - ', '--', '—', ' – ']
 }
 
 # ambiguous financial tickers that need extra validation

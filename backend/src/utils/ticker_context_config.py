@@ -2,38 +2,15 @@
 
 TICKER_CONTEXT = {
     # mega-cap tech
-    "NVDA": [
-        "nvidia", "geforce", "rtx", "cuda", "gpu", "jensen",
-        "chips", "semiconductor", "data center", "taiwan"
-    ],
-    "TSLA": [
-        "tesla", "elon", "musk", "gigafactory", "autopilot",
-        "cybertruck", "model 3", "model y", "full self driving"
-    ],
-    "META": [
-        "meta", "facebook", "instagram", "whatsapp", "oculus",
-        "vr", "metaverse", "threads", "zuck", "zuckerberg"
-    ],
-    "AAPL": [
-        "apple", "iphone", "ipad", "mac", "macbook", "ipad pro"
-    ],
-    "MSFT": [
-        "microsoft", "azure", "windows", "xbox", "copilot", "nadella"
-    ],
-    "GME": [
-        "gamestop", "ryan cohen", "stonks", "moass", "retail trader"
-    ],
-    "IOVA": [
-        "iova", "biotech", "til therapy", "lifileucel", "melanoma",
-        "cell therapy", "oncology"
-    ],
-    "GOLD": [
-        "barrick", "barrick gold", "mining", "ounces", "commodity",
-        "goldcorp", "newmont"
-    ],
-    "IBIT": [
-        "blackrock", "bitcoin etf", "spot bitcoin", "crypto fund"
-    ],
+    "NVDA": [ "nvidia", "geforce", "rtx", "cuda", "gpu", "jensen", "chips", "semiconductor", "data center", "taiwan"],
+    "TSLA": ["tesla", "elon", "musk", "gigafactory", "autopilot", "cybertruck", "model 3", "model y", "full self driving"],
+    "META": ["meta", "facebook", "instagram", "whatsapp", "oculus", "vr", "metaverse", "threads", "zuck", "zuckerberg"],
+    "AAPL": ["apple", "iphone", "ipad", "mac", "macbook", "ipad pro"],
+    "MSFT": ["microsoft", "azure", "windows", "xbox", "copilot", "nadella"],
+    "GME": ["gamestop", "ryan cohen", "stonks", "moass", "retail trader"],
+    "IOVA": ["iova", "biotech", "til therapy", "lifileucel", "melanoma","cell therapy", "oncology"],
+    "GOLD": ["barrick", "barrick gold", "mining", "ounces", "commodity","goldcorp", "newmont"],
+    "IBIT": ["blackrock", "bitcoin etf", "spot bitcoin", "crypto fund"],
     "SPY": ["s&p 500", "index fund", "sp500"],
     "QQQ": ["nasdaq 100", "tech index", "nasdaq"],
     "RGTI": ["rigetti", "quantum", "kulkarni", "rigetti computing"],
@@ -75,6 +52,17 @@ TICKER_CONTEXT = {
     "NEE": ["nextera", "utility", "renewable energy", "florida power", "fpl"],
     "PLD": ["prologis", "reit", "logistics", "warehouses"],
     "VGSH": ["vanguard", "short term treasury", "treasury etf", "bond fund"],
+    "DASH": ["doordash", "delivery", "food delivery", "courier", "dashpass", "ubereats", "grubhub", "restaurant delivery"],
+    "WBD": ["warner", "discovery", "hbo", "max", "netflix", "studio deal"],
+    "BABA": ["alibaba", "china ecommerce", "hangzhou", "ali cloud", "jack ma"],
+    "BILI": ["bilibili", "china streaming", "anime", "video platform"],
+    "WB": ["weibo", "china social media", "microblog"],
+    "PDD": ["pinduoduo", "temu", "china ecommerce"],
+    "TAL": ["tal education", "tutoring", "china education", "edtech"],
+    "EDU": ["new oriental", "education", "china tutoring"],
+    "EDIT": ["editas", "gene editing", "crispr", "biotech"],
+    "BUD": ["anheuser", "inbev", "budweiser", "beer", "alcohol", "beverage", "beyond beer", "beatbox"],
+    "NQ": ["nasdaq futures", "e-mini", "index futures", "/nq", "nasdaq 100"],
 }
 
 # Keywords that strongly indicate the uppercase token is NOT a ticker.
@@ -89,9 +77,6 @@ CONTEXT_BLACKLIST = {
     "NYSE": ["exchange", "trading floor", "listing", "market open"],
     "FTSE": ["index", "ftse 100", "ftse 250"],
     "CNBC": ["tv", "anchor", "interview", "network"],
-    "ADP": [
-        "jobs report", "employment report", "labor market", "private employers",
-        "payroll data", "adp numbers", "jobs data"
-    ],
+    "ADP": ["jobs report", "employment report", "labor market", "private employers","payroll data", "adp numbers", "jobs data"],
 }
 

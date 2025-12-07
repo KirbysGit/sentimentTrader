@@ -26,7 +26,7 @@ organization:
 
 # imports.
 import logging
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
 # local imports.
 from src.utils.config import (
@@ -59,53 +59,55 @@ class EntityLinker:
     # ==================================================================
     # core validation
     # ==================================================================
-    def validate(self, text: str, ticker: str) -> Tuple[bool, float]:
+    def validate(self, text: str, ticker: str) -> Tuple[bool, float, Dict]:
         """
         decide whether the extracted ticker is real + return base confidence.
         """
 
         if not text or not ticker:
-            return False, 0.0
+            return False, 0.0, {"linker_reason": "empty_text"}
 
         text_low = text.lower()
         ticker = ticker.upper()
+        meta: Dict = {"linker_reason": "default"}
 
         # 1. etf = always valid
         if ticker in self.etf_whitelist:
-            return True, 1.0
+                return True, 1.0, {"linker_reason": "etf_whitelist"}
 
         # 2. blacklist = invalid
         if ticker in self.common_word_blacklist:
-            return False, 0.0
+            return False, 0.0, {"linker_reason": "common_word"}
         if ticker in MACRO_TERMS or ticker in WSB_SLANG:
-            return False, 0.0
+            return False, 0.0, {"linker_reason": "macro_or_slang"}
         if ticker in STOCK_DATA_BLACKLIST:
-            return False, 0.0
+            return False, 0.0, {"linker_reason": "stock_blacklist"}
 
         # 3. context blacklist overrides everything.
         blacklist_terms = self.context_blacklist.get(ticker, [])
         if blacklist_terms and any(term in text_low for term in blacklist_terms):
-            return False, 0.0
+            return False, 0.0, {"linker_reason": "context_blacklist", "matched_terms": blacklist_terms}
 
         # 4. context keywords boost confidence.
-        if self.has_alias_context(text_low, ticker):
-            return True, 0.9
+        context_matches = self._context_matches(text_low, ticker)
+        if context_matches:
+            return True, 0.9, {"linker_reason": "context_keywords", "matched_terms": context_matches}
 
         # 5. configured aliases imply known ticker.
         if ticker in TICKER_ALIASES:
-            return True, 0.8
+            return True, 0.8, {"linker_reason": "alias_map"}
 
         # 3. context-required tickers (AI, GDP, etc.).
         if ticker in CONTEXT_REQUIRED_TICKERS:
-            if not self.has_alias_context(text_low, ticker):
-                return False, 0.0
+            if not context_matches:
+                return False, 0.0, {"linker_reason": "context_required_missing"}
 
         # 4. literal ticker mention ($TSLA or TSLA in text).
         if ticker.lower() in text_low:
-            return True, 0.6
+            return True, 0.6, {"linker_reason": "literal_mention"}
 
         # default low-confidence validation (could still be real).
-        return True, 0.5
+        return True, 0.5, {"linker_reason": "default_low_confidence"}
 
     # ==================================================================
     # confidence adjustment after extraction
@@ -115,7 +117,7 @@ class EntityLinker:
         text: str,
         tickers: List[str],
         scores: List[float]
-    ) -> Tuple[List[str], List[float]]:
+    ) -> Tuple[List[str], List[float], List[List[str]]]:
         """
         lightweight booster:
         - Alias match → +0.20
@@ -124,32 +126,38 @@ class EntityLinker:
         """
 
         if not tickers:
-            return tickers, scores
+            return tickers, scores, []
 
         text_low = text.lower()
         boosted = []
+        boost_details: List[List[str]] = []
 
         for tkr, score in zip(tickers, scores):
             tkr_up = tkr.upper()
             new_score = score
+            reasons: List[str] = []
 
             # 1. boost on literal mention.
             if tkr_up.lower() in text_low:
                 new_score = min(new_score + 0.10, 1.0)
+                reasons.append("literal_mention_boost")
 
             # 2. boost on context keywords.
             for alias in self.ticker_context.get(tkr_up, []):
                 if alias in text_low:
                     new_score = min(new_score + 0.20, 1.0)
+                    reasons.append(f"context_keyword:{alias}")
                     break
 
             # 3. slight penalty for extremely low confidence.
             if new_score < 0.15:
                 new_score = max(new_score - 0.05, 0)
+                reasons.append("low_score_penalty")
 
             boosted.append(new_score)
+            boost_details.append(reasons)
 
-        return tickers, boosted
+        return tickers, boosted, boost_details
 
     # ==================================================================
     # helpers
@@ -159,7 +167,12 @@ class EntityLinker:
         require supporting company keywords for ambiguous tickers
         like AI, GDP, VAT, etc.
         """
+        return bool(self._context_matches(text_low, ticker))
+
+    def _context_matches(self, text_low: str, ticker: str) -> List[str]:
+        """return context keywords present in text for a ticker."""
+        matches = []
         for alias in self.ticker_context.get(ticker, []):
             if alias in text_low:
-                return True
-        return False
+                matches.append(alias)
+        return matches

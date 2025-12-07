@@ -42,6 +42,7 @@ from typing import List, Iterable, Optional
 from src.b_analysis.entity_linker import EntityLinker
 from src.b_analysis.ticker_extractor import TickerExtractor
 from src.b_analysis.sentiment_scorer import SentimentScorer
+from src.b_analysis.confidence_scorer import ConfidenceScorer
 from src.utils.path_config import (
     PROJECT_ROOT,
     RAW_REDDIT_DIR,
@@ -69,7 +70,99 @@ class RedditDataProcessor:
         "missing_context_keyword",
         "entity_linker_reject",  
         "timestamp_et",
+        "unknown_symbol",
     }
+
+    # minimal feature columns that move forward to Stage 3 / feature builder.
+    PROCESSED_OUTPUT_COLUMNS = [
+        "id",
+        "created_utc",
+        "subreddit",
+        "flair",
+        "author_name",
+        "author_karma",
+        "author_is_mod",
+        "author_created_utc",
+        "score",
+        "num_comments",
+        "upvote_ratio",
+        "engagement",
+        "is_relevant",
+        "sentiment",
+        "tickers",
+        "ticker_scores",
+        "ticker_confidence_reasons",
+        "ticker_in_title",
+        "num_tickers_in_post",
+        "is_portfolio_post",
+        "is_watchlist_post",
+        "has_position_language",
+        "run_date",
+        "run_id",
+    ]
+
+    PORTFOLIO_KEYWORDS = (
+        "my portfolio",
+        "portfolio allocation",
+        "allocation",
+        "allocations",
+        "my holdings",
+        "holdings:",
+        "positions:",
+        "exposure",
+        "weighting",
+        "weights",
+        "percent",
+        "%",
+    )
+
+    WATCHLIST_KEYWORDS = (
+        "watchlist",
+        "watch list",
+        "list of tickers",
+        "ticker list",
+        "shopping list",
+        "ideas list",
+        "top tickers",
+        "ticker summary",
+    )
+
+    POSITION_LANGUAGE_PHRASES = (
+        "i'm long",
+        "im long",
+        "i am long",
+        "going long",
+        "went long",
+        "long on",
+        "i'm short",
+        "im short",
+        "going short",
+        "shorting",
+        "buying",
+        "bought",
+        "accumulating",
+        "adding",
+        "sold",
+        "selling",
+        "trimmed",
+        "taking profit",
+        "price target",
+        "pt of",
+        "entry at",
+        "entry price",
+        "exit at",
+        "stop loss",
+        "covered call",
+        "covered calls",
+        "writing calls",
+        "selling calls",
+        "selling puts",
+        "bought calls",
+        "bought puts",
+        "calls expiring",
+        "puts expiring",
+        "leaps",
+    )
 
     # initialize reddit data processor.
     def __init__(self, input_files: Optional[Iterable[Path]] = None, run_date: Optional[str] = None, run_id: Optional[str] = None):
@@ -94,13 +187,14 @@ class RedditDataProcessor:
         self.extractor = TickerExtractor()
         self.entity_linker = EntityLinker()
         self.sentiment_scorer = SentimentScorer()
+        self.confidence_scorer = ConfidenceScorer()
         self.finance_keywords = {
             kw.lower() for kw in (STRONG_FINANCE_WORDS | WEAK_FINANCE_WORDS)
         }
         self.canonical_alias_map = get_canonical_alias_map()
 
         # optional seen-post registry hooks (disabled for now)
-        self.enable_seen_registry = False
+        self.enable_seen_registry = True
         self.seen_registry_path = PROCESSED_REDDIT_BY_DAY_DIR.parent / "seen_post_ids.json"
         self._seen_ids = self._load_seen_ids() if self.enable_seen_registry else set()
 
@@ -135,6 +229,20 @@ class RedditDataProcessor:
         except Exception as exc:
             print(f"{Fore.YELLOW}warning: unable to persist seen ids ({exc}){Style.RESET_ALL}")
 
+    def _record_seen_ids(self, df: pd.DataFrame) -> None:
+        """Update seen-id registry with posts processed this run."""
+        if not self.enable_seen_registry or "id" not in df.columns or df.empty:
+            return
+        ids_series = df["id"].dropna().astype(str)
+        new_ids = {i for i in ids_series if i and i.lower() != "nan"}
+        if not new_ids:
+            return
+        added = new_ids - self._seen_ids
+        if not added:
+            return
+        self._seen_ids.update(added)
+        self._persist_seen_ids()
+
     @staticmethod
     def _format_path(path: Path) -> str:
         """Return a nice relative path when possible."""
@@ -160,10 +268,123 @@ class RedditDataProcessor:
 
     def _canonicalize_ticker(self, ticker: str) -> str:
         """normalize a ticker using the alias map, defaulting to uppercase original."""
-        ticker_up = (ticker or "").upper()
-        if not ticker_up:
-            return ticker_up
+        if ticker is None:
+            return ""
+        if isinstance(ticker, float) and np.isnan(ticker):
+            return ""
+        ticker_str = str(ticker).strip()
+        if not ticker_str:
+            return ""
+        ticker_up = ticker_str.upper()
         return self.canonical_alias_map.get(ticker_up, ticker_up)
+
+    @staticmethod
+    def _build_ticker_snippet(text: str, ticker: str, radius: int = 30) -> str:
+        """Return a short excerpt centered on the first occurrence of ticker."""
+        if not isinstance(text, str) or not ticker:
+            return (text or "")[: radius * 2]
+        text_low = text.lower()
+        ticker_low = ticker.lower()
+        idx = text_low.find(ticker_low)
+        if idx == -1:
+            return text[: radius * 2]
+        start = max(0, idx - radius)
+        end = min(len(text), idx + len(ticker) + radius)
+        return text[start:end].strip()
+
+    def _has_position_language(self, text: str) -> bool:
+        """Detect whether the post discusses specific trade positioning."""
+        if not text:
+            return False
+        text_low = text.lower()
+        for phrase in self.POSITION_LANGUAGE_PHRASES:
+            if phrase in text_low:
+                return True
+        if re.search(r"\b(long|short)\s+\$?[a-z]{1,5}\b", text_low):
+            return True
+        if re.search(r"\b(buy|sell|calls?|puts?)\b", text_low):
+            return True
+        return False
+
+    def _is_portfolio_post(self, text: str, tickers: List[str]) -> bool:
+        """Heuristic to detect allocation / portfolio breakdown posts."""
+        if not text:
+            return False
+        text_low = text.lower()
+        if any(keyword in text_low for keyword in self.PORTFOLIO_KEYWORDS):
+            return True
+        percent_hits = len(re.findall(r"\d{1,3}\s*%", text))
+        if percent_hits >= 2 and len(tickers) >= 3:
+            return True
+        if "portfolio" in text_low and len(tickers) >= 3:
+            return True
+        return False
+
+    def _is_watchlist_post(self, text: str, tickers: List[str], has_position_language: bool) -> bool:
+        """Heuristic to identify list/watchlist style posts."""
+        if not text:
+            return False
+        text_low = text.lower()
+        if any(keyword in text_low for keyword in self.WATCHLIST_KEYWORDS):
+            return True
+        bullet_hits = len(re.findall(r"(?:^|\n)[\-\*\u2022]\s*\$?[A-Za-z]{2,5}\b", text, flags=re.MULTILINE))
+        if bullet_hits >= 3:
+            return True
+        if len(tickers) >= 5 and not has_position_language:
+            return True
+        return False
+
+    @staticmethod
+    def _ticker_in_title_flags(title: str, tickers: List[str]) -> List[bool]:
+        """Return per-ticker booleans indicating presence in the title."""
+        if not isinstance(title, str):
+            title = ""
+        title_upper = title.upper()
+        flags: List[bool] = []
+        for ticker in tickers:
+            symbol = ticker.upper() if ticker else ""
+            if not symbol:
+                flags.append(False)
+                continue
+            pattern = rf"(?:^|[^A-Z0-9\$])\$?{re.escape(symbol)}(?:[^A-Z0-9]|$)"
+            flags.append(bool(re.search(pattern, title_upper)))
+        return flags
+
+    @staticmethod
+    def _compute_ticker_weight(
+        num_tickers: int,
+        in_title: bool,
+        is_portfolio_post: bool,
+        is_watchlist_post: bool,
+        has_position_language: bool,
+    ) -> float:
+        """Derive a per-mention weight to scale sentiment/engagement impact."""
+        weight = 1.0
+        num_tickers = max(1, num_tickers or 1)
+
+        if num_tickers >= 6:
+            weight *= 0.5
+        elif num_tickers == 1:
+            weight *= 1.2
+
+        if is_portfolio_post:
+            weight *= 0.3
+        if is_watchlist_post:
+            weight *= 0.6
+        if in_title:
+            weight *= 1.5
+        if has_position_language:
+            weight *= 2.0
+
+        return float(min(max(weight, 0.05), 5.0))
+
+    def _build_processed_output_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """trim processed dataframe down to feature-ready columns."""
+        df = df.copy()
+        df["run_date"] = self.run_date
+        df["run_id"] = self.run_id
+        columns = [col for col in self.PROCESSED_OUTPUT_COLUMNS if col in df.columns]
+        return df[columns]
 
     # ------------------------------------------------------------
     # financial relevance heuristic
@@ -195,15 +416,35 @@ class RedditDataProcessor:
             if not tickers or not scores:
                 continue
 
-            engagement = float(row.get("engagement", 0.0) or 0.0)
-            sentiment = float(row.get("sentiment", 0.0) or 0.0)
+            engagement_val = row.get("engagement", 0.0)
+            sentiment_val = row.get("sentiment", 0.0)
+            engagement = float(engagement_val) if pd.notna(engagement_val) else 0.0
+            sentiment = float(sentiment_val) if pd.notna(sentiment_val) else 0.0
             is_relevant = bool(row.get("is_relevant", False))
+             title_flags = row.get("ticker_in_title", []) or []
+             num_tickers = int(row.get("num_tickers_in_post") or len(tickers) or 0)
+             if num_tickers <= 0:
+                 num_tickers = len(tickers)
+             is_portfolio_post = bool(row.get("is_portfolio_post", False))
+             is_watchlist_post = bool(row.get("is_watchlist_post", False))
+             has_position_language = bool(row.get("has_position_language", False))
             if len(tickers) != len(scores):
                 min_len = min(len(tickers), len(scores))
                 tickers = tickers[:min_len]
                 scores = scores[:min_len]
+                title_flags = title_flags[:min_len] if len(title_flags) >= min_len else title_flags
+            if len(title_flags) > len(tickers):
+                title_flags = title_flags[: len(tickers)]
 
-            for ticker, score in zip(tickers, scores):
+            for idx, (ticker, score) in enumerate(zip(tickers, scores)):
+                 in_title = bool(title_flags[idx]) if idx < len(title_flags) else False
+                 weight = self._compute_ticker_weight(
+                     num_tickers=num_tickers,
+                     in_title=in_title,
+                     is_portfolio_post=is_portfolio_post,
+                     is_watchlist_post=is_watchlist_post,
+                     has_position_language=has_position_language,
+                 )
                 rows.append(
                     {
                         "date": row["date"],
@@ -212,6 +453,15 @@ class RedditDataProcessor:
                         "engagement": engagement,
                         "sentiment": sentiment,
                         "is_relevant": is_relevant,
+                         "weight": weight,
+                         "in_title": in_title,
+                         "has_position_language": has_position_language,
+                         "is_portfolio_post": is_portfolio_post,
+                         "is_watchlist_post": is_watchlist_post,
+                         "num_tickers_in_post": num_tickers,
+                         "weighted_engagement": engagement * weight,
+                         "weighted_sentiment": sentiment * weight,
+                         "weighted_sentiment_eng": sentiment * engagement * weight,
                     }
                 )
 
@@ -219,8 +469,12 @@ class RedditDataProcessor:
             return
 
         daily = pd.DataFrame(rows)
+        daily["ticker"] = daily["ticker"].apply(self._canonicalize_ticker)
+        daily = daily[daily["ticker"] != ""]
         daily["is_relevant_int"] = daily["is_relevant"].astype(int)
         daily["sentiment_x_eng"] = daily["sentiment"] * daily["engagement"]
+        daily["has_position_language_int"] = daily["has_position_language"].astype(int)
+        daily["in_title_int"] = daily["in_title"].astype(int)
 
         grouped = daily.groupby(["date", "ticker"], as_index=False)
         daily_agg = grouped.agg(
@@ -233,6 +487,12 @@ class RedditDataProcessor:
             sentiment_std=("sentiment", "std"),
             sentiment_x_eng_sum=("sentiment_x_eng", "sum"),
             relevant_count=("is_relevant_int", "sum"),
+            total_weight=("weight", "sum"),
+            weighted_engagement=("weighted_engagement", "sum"),
+            weighted_sentiment_sum=("weighted_sentiment", "sum"),
+            weighted_sentiment_eng=("weighted_sentiment_eng", "sum"),
+            strong_post_count=("has_position_language_int", "sum"),
+            title_focus_mentions=("in_title_int", "sum"),
         )
 
         daily_agg["sentiment_std"] = daily_agg["sentiment_std"].fillna(0.0)
@@ -240,6 +500,14 @@ class RedditDataProcessor:
             "total_engagement"
         ].replace(0, np.nan)
         daily_agg["eng_weighted_sentiment"] = daily_agg["eng_weighted_sentiment"].fillna(0.0)
+        daily_agg["weighted_sentiment_avg"] = (
+            daily_agg["weighted_sentiment_sum"] / daily_agg["total_weight"].replace(0, np.nan)
+        )
+        daily_agg["weighted_sentiment_avg"] = daily_agg["weighted_sentiment_avg"].fillna(0.0)
+        daily_agg["weighted_engagement_sentiment"] = (
+            daily_agg["weighted_sentiment_eng"] / daily_agg["weighted_engagement"].replace(0, np.nan)
+        )
+        daily_agg["weighted_engagement_sentiment"] = daily_agg["weighted_engagement_sentiment"].fillna(0.0)
         daily_agg["relevant_ratio"] = daily_agg["relevant_count"] / daily_agg["num_mentions"].clip(
             lower=1
         )
@@ -261,6 +529,10 @@ class RedditDataProcessor:
                 existing = pd.DataFrame()
         else:
             existing = pd.DataFrame()
+
+        if not existing.empty and "ticker" in existing.columns:
+            existing["ticker"] = existing["ticker"].apply(self._canonicalize_ticker)
+            existing = existing[existing["ticker"] != ""]
 
         combined = pd.concat([existing, daily_agg], ignore_index=True)
         if not combined.empty:
@@ -361,7 +633,11 @@ class RedditDataProcessor:
         for _, row in df.iterrows():
             tickers = row.get("tickers", [])
             scores = row.get("ticker_scores", [])
-            for ticker, confidence in zip(tickers, scores):
+            reasons = row.get("ticker_confidence_reasons", [])
+            title_flags = row.get("ticker_in_title", [])
+            for idx, (ticker, confidence) in enumerate(zip(tickers, scores)):
+                reason = reasons[idx] if isinstance(reasons, list) and idx < len(reasons) else ""
+                text = row.get("cleaned_text", "")
                 entry = {
                     "post_id": row.get("id"),
                     "subreddit": row.get("subreddit"),
@@ -369,14 +645,22 @@ class RedditDataProcessor:
                     "engagement": row.get("engagement"),
                     "sentiment": row.get("sentiment"),
                     "confidence": float(confidence),
-                    "text_excerpt": (
-                        row.get("cleaned_text", "")[:200]
-                        if isinstance(row.get("cleaned_text"), str)
-                        else ""
+                    "confidence_reason": reason,
+                    "context_flags": {
+                        "in_title": bool(title_flags[idx]) if isinstance(title_flags, list) and idx < len(title_flags) else False,
+                        "num_tickers_in_post": int(row.get("num_tickers_in_post", 0) or 0),
+                        "is_portfolio_post": bool(row.get("is_portfolio_post", False)),
+                        "is_watchlist_post": bool(row.get("is_watchlist_post", False)),
+                        "has_position_language": bool(row.get("has_position_language", False)),
+                    },
+                    "text_excerpt": self._build_ticker_snippet(
+                        text if isinstance(text, str) else "",
+                        ticker,
+                        radius=30,
                     ),
                     "full_text": (
-                        row.get("cleaned_text", "")
-                        if isinstance(row.get("cleaned_text"), str)
+                        text
+                        if isinstance(text, str)
                         else ""
                     ),
                     "title": row.get("title"),
@@ -471,7 +755,16 @@ class RedditDataProcessor:
         df = pd.concat(dfs, ignore_index=True)
         self.raw_count = len(df)
         if "id" in df.columns:
+            df["id"] = df["id"].astype(str)
             df = df.drop_duplicates(subset="id")
+            if self.enable_seen_registry and self._seen_ids:
+                before_seen_filter = len(df)
+                df = df[~df["id"].isin(self._seen_ids)]
+                skipped = before_seen_filter - len(df)
+                if skipped > 0:
+                    print(
+                        f"{Fore.YELLOW}⟳ skipped {skipped} previously processed posts (seen registry){Style.RESET_ALL}"
+                    )
         print(f"{Fore.GREEN}✓ loaded {len(df)} raw posts{Style.RESET_ALL}")
 
         text_col = "text" if "text" in df.columns else "selftext"
@@ -492,34 +785,65 @@ class RedditDataProcessor:
         # extract tickers and confidence.
         tickers_list = []
         scores_list = []
+        confidence_reasons_list = []
+        ticker_in_title_flags_list: List[List[bool]] = []
+        num_ticker_counts: List[int] = []
+        portfolio_post_flags: List[bool] = []
+        watchlist_post_flags: List[bool] = []
+        position_language_flags: List[bool] = []
         review_queue = []
 
         # iterate through each row of the dataframe.
         for _, row in df.iterrows():
             text = row.get("cleaned_text", "")
-            tks, scs, review_items = self.extractor.extract_tickers(text)
+            title_text = row.get("title") or ""
+            body_raw = row.get(text_col, "")
+            raw_context_text = f"{title_text}\n{body_raw}" if isinstance(body_raw, str) else str(title_text or "")
+            tks, base_scores, review_items, evidence_items = self.extractor.extract_tickers(text)
+            base_scores = [float(s) if (s is not None and s != "") else 0.0 for s in base_scores]
 
-            # convert scores to floats.
-            scs = [float(s) if (s is not None and s != "") else 0.0 for s in scs]
+            final_scores: List[float] = []
+            confidence_notes: List[str] = []
+            if tks:
+                for ticker, base_score, evidence in zip(tks, base_scores, evidence_items):
+                    scored_value, summary = self.confidence_scorer.score(ticker, base_score, evidence)
+                    final_scores.append(scored_value)
+                    confidence_notes.append(summary)
 
-            # boost the confidence of the tickers.
-            tks, scs = self.entity_linker.boost_confidences(text, tks, scs)
+            approved_tickers: List[str] = []
+            approved_scores: List[float] = []
+            approved_notes: List[str] = []
+            for ticker, score, note in zip(tks, final_scores, confidence_notes):
+                if not self._allow_final_ticker(ticker):
+                    continue
+                canonical = self._canonicalize_ticker(ticker)
+                approved_tickers.append(canonical)
+                approved_scores.append(score)
+                approved_notes.append(note)
 
-            # filter the tickers and scores.
-            filtered_pairs = [
-                (ticker, score)
-                for ticker, score in zip(tks, scs)
-                if self._allow_final_ticker(ticker)
-            ]
-            if filtered_pairs:
-                tks = [self._canonicalize_ticker(t) for t, _ in filtered_pairs]
-                scs = [s for _, s in filtered_pairs]
+            if approved_tickers:
+                tks = approved_tickers
+                scs = approved_scores
+                note_sequence = approved_notes
             else:
                 tks, scs = [], []
+                note_sequence = []
+
+            has_position_language = self._has_position_language(raw_context_text)
+            is_portfolio_post = self._is_portfolio_post(raw_context_text, tks)
+            is_watchlist_post = self._is_watchlist_post(raw_context_text, tks, has_position_language)
+            title_flags = self._ticker_in_title_flags(title_text, tks)
+            num_tickers = len(tks)
 
             # append the tickers and scores to the lists.
             tickers_list.append(tks)
             scores_list.append(scs)
+            confidence_reasons_list.append(note_sequence)
+            ticker_in_title_flags_list.append(title_flags)
+            num_ticker_counts.append(num_tickers)
+            portfolio_post_flags.append(is_portfolio_post)
+            watchlist_post_flags.append(is_watchlist_post)
+            position_language_flags.append(has_position_language)
 
             # filter the review items.
             filtered_review = [
@@ -534,18 +858,28 @@ class RedditDataProcessor:
                     "subreddit": row.get("subreddit"),
                     "score": row.get("score"),
                     "engagement": row.get("engagement"),
-                    "text_excerpt": (text if isinstance(text, str) else ""),
                     "full_text": (text if isinstance(text, str) else ""),
                     "title": row.get("title"),
                 }
                 # append the enriched review items to the review queue.
                 for item in filtered_review:
-                    enriched = {**item, **base_meta}
+                    snippet = self._build_ticker_snippet(
+                        text if isinstance(text, str) else "",
+                        item.get("ticker", ""),
+                        radius=30,
+                    )
+                    enriched = {**item, **base_meta, "text_excerpt": snippet}
                     review_queue.append(enriched)
 
         # append the tickers and scores to the dataframe.
         df["tickers"] = tickers_list
         df["ticker_scores"] = scores_list
+        df["ticker_confidence_reasons"] = confidence_reasons_list
+        df["ticker_in_title"] = ticker_in_title_flags_list
+        df["num_tickers_in_post"] = num_ticker_counts
+        df["is_portfolio_post"] = portfolio_post_flags
+        df["is_watchlist_post"] = watchlist_post_flags
+        df["has_position_language"] = position_language_flags
 
         # only keep rows with at least 1 ticker.
         df = df[df["tickers"].apply(lambda x: len(x) > 0)]
@@ -556,7 +890,8 @@ class RedditDataProcessor:
 
         # save the processed file.
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(self.output_file, index=False)
+        output_df = self._build_processed_output_df(df)
+        output_df.to_csv(self.output_file, index=False)
 
         # build per-day ticker metrics.
         self._build_daily_ticker_metrics(df)
@@ -567,6 +902,7 @@ class RedditDataProcessor:
         self._log_summary(df)
         self._write_ticker_review_queue(review_queue)
         self._write_ticker_sources(df)
+        self._record_seen_ids(df)
 
         print(f"{Fore.GREEN}✓ saved processed reddit data → {self._format_path(self.output_file)}{Style.RESET_ALL}")
         return df

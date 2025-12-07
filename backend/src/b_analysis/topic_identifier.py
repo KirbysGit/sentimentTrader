@@ -62,6 +62,17 @@ class TopicIdentifier:
         if "ticker_scores" in df.columns:
             df["ticker_scores"] = df["ticker_scores"].apply(self._safe_eval_dict)
 
+        if "ticker_in_title" in df.columns:
+            df["ticker_in_title"] = df["ticker_in_title"].apply(self._safe_eval_list)
+
+        bool_columns = ["is_portfolio_post", "is_watchlist_post", "has_position_language"]
+        for col in bool_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(self._coerce_bool)
+
+        if "num_tickers_in_post" in df.columns:
+            df["num_tickers_in_post"] = df["num_tickers_in_post"].fillna(0).astype(int)
+
         return df
 
     def _resolve_processed_path(self, target_date: Optional[str]) -> Path:
@@ -103,6 +114,18 @@ class TopicIdentifier:
         except:
             return {}
 
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        """Coerce CSV-loaded values into real booleans."""
+        if isinstance(value, bool):
+            return value
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return False
+        if isinstance(value, (int, np.integer)):
+            return value != 0
+        text = str(value).strip().lower()
+        return text in {"true", "1", "yes", "y"}
+
     # ------------------------------------------------------------
     # trending logic
     # ------------------------------------------------------------
@@ -120,21 +143,45 @@ class TopicIdentifier:
         for _, row in df.iterrows():
             # get the tickers and scores.
             tickers = row.get("tickers", [])
-            scores = row.get("ticker_scores", {})
-            engagement = row.get("engagement", 0)
+            scores_raw = row.get("ticker_scores", {})
+            score_lookup = self._build_score_lookup(tickers, scores_raw)
+            engagement_val = row.get("engagement", 0.0)
+            engagement = float(engagement_val) if pd.notna(engagement_val) else 0.0
             date = row.get("date", None)
             subreddit = row.get("subreddit", None)
             context = row.get("cleaned_text", "")[:200]
+            title_flags = row.get("ticker_in_title", []) or []
+            num_tickers = int(row.get("num_tickers_in_post", len(tickers) or 0) or 0)
+            if num_tickers <= 0:
+                num_tickers = len(tickers)
+            is_portfolio_post = bool(row.get("is_portfolio_post", False))
+            is_watchlist_post = bool(row.get("is_watchlist_post", False))
+            has_position_language = bool(row.get("has_position_language", False))
+            sentiment_val = row.get("sentiment", 0.0)
+            sentiment = float(sentiment_val) if pd.notna(sentiment_val) else 0.0
 
             # iterate through each ticker.
-            for ticker in tickers:
-                conf = scores.get(ticker, 0)
+            for idx, ticker in enumerate(tickers):
+                conf = score_lookup.get(ticker, 0)
+                in_title = bool(title_flags[idx]) if idx < len(title_flags) else False
+                weight = self._compute_weight(
+                    num_tickers=num_tickers,
+                    in_title=in_title,
+                    is_portfolio_post=is_portfolio_post,
+                    is_watchlist_post=is_watchlist_post,
+                    has_position_language=has_position_language,
+                )
 
                 # append the row to the list.
                 rows.append({
                     "ticker": ticker,
                     "confidence": conf,
                     "engagement": engagement,
+                    "weight": weight,
+                    "weighted_engagement": engagement * weight,
+                    "has_position_language": has_position_language,
+                    "in_title": in_title,
+                    "sentiment": sentiment,
                     "date": date,
                     "subreddit": subreddit,
                     "context": context,
@@ -142,21 +189,60 @@ class TopicIdentifier:
 
         return pd.DataFrame(rows)
 
+    @staticmethod
+    def _build_score_lookup(tickers: List[str], scores_raw) -> Dict[str, float]:
+        """Normalize ticker_scores column (list or dict) for downstream use."""
+        if isinstance(scores_raw, dict):
+            return {k: float(v) for k, v in scores_raw.items()}
+        if isinstance(scores_raw, list):
+            return {ticker: float(score) for ticker, score in zip(tickers, scores_raw)}
+        return {}
+
+    @staticmethod
+    def _compute_weight(
+        num_tickers: int,
+        in_title: bool,
+        is_portfolio_post: bool,
+        is_watchlist_post: bool,
+        has_position_language: bool,
+    ) -> float:
+        """Mirror stage 2 weighting to keep scoring consistent."""
+        weight = 1.0
+        num_tickers = max(1, num_tickers or 1)
+
+        if num_tickers >= 6:
+            weight *= 0.5
+        elif num_tickers == 1:
+            weight *= 1.2
+
+        if is_portfolio_post:
+            weight *= 0.3
+        if is_watchlist_post:
+            weight *= 0.6
+        if in_title:
+            weight *= 1.5
+        if has_position_language:
+            weight *= 2.0
+
+        return float(min(max(weight, 0.05), 5.0))
+
     def _score_tickers(self, df_long: pd.DataFrame) -> pd.DataFrame:
         """aggregate and score each ticker."""
 
         grouped = df_long.groupby("ticker").agg({
             "confidence": "mean",
             "engagement": "sum",
+            "weighted_engagement": "sum",
+            "weight": "sum",
             "ticker": "count",
-        }).rename(columns={"ticker": "mentions"})
+        }).rename(columns={"ticker": "mentions", "weight": "weighted_mentions"})
 
         # final score:
-        #   mentions * avg_confidence * log(1 + engagement)
+        #   weighted_mentions * avg_confidence * log(1 + weighted_engagement)
         grouped["score"] = (
-            grouped["mentions"]
+            grouped["weighted_mentions"]
             * grouped["confidence"]
-            * np.log1p(grouped["engagement"])
+            * np.log1p(grouped["weighted_engagement"])
         )
 
         return grouped.sort_values("score", ascending=False).reset_index()
