@@ -63,6 +63,7 @@ TICKER_CONTEXT = {
     "EDIT": ["editas", "gene editing", "crispr", "biotech"],
     "BUD": ["anheuser", "inbev", "budweiser", "beer", "alcohol", "beverage", "beyond beer", "beatbox"],
     "NQ": ["nasdaq futures", "e-mini", "index futures", "/nq", "nasdaq 100"],
+    "BE": ["bloom energy", "fuel cell", "solid oxide", "power server", "hydrogen"],
 }
 
 # Keywords that strongly indicate the uppercase token is NOT a ticker.

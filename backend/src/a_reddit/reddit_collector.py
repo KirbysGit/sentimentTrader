@@ -45,6 +45,7 @@ what we get:
 """
 # imports.
 import os
+import json
 import logging
 import pandas as pd
 from praw import Reddit
@@ -56,7 +57,7 @@ from datetime import datetime, timedelta, timezone
 
 
 # local imports.
-from src.utils.path_config import RAW_REDDIT_DIR
+from src.utils.path_config import RAW_REDDIT_DIR, PROCESSED_REDDIT_BY_DAY_DIR
 from src.utils.config import (
     SUBREDDITS,
     SORT_METHODS,
@@ -78,13 +79,18 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 class RedditDataCollector:
 
-    def __init__(self, data_dir=None, max_days_lookback=30, run_date=None, run_id=None):
-        self._run_ts = datetime.now(timezone.utc)
-        self.run_date = run_date or self._run_ts.date().isoformat()
-        self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")
-        self.data_dir = data_dir or self._build_day_dir(RAW_REDDIT_DIR, self.run_date)
-        self.max_days_lookback = max_days_lookback
-        os.makedirs(self.data_dir, exist_ok=True)
+    def __init__(self, data_dir=None, max_days_lookback=30, run_date=None, run_id=None, enable_seen_registry: bool = True):
+        self._run_ts = datetime.now(timezone.utc)                                                       # run timestamp.
+        self.run_date = run_date or self._run_ts.date().isoformat()                                     # run date.
+        self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")                                  # run id.
+        self.data_dir = data_dir or self._build_day_dir(RAW_REDDIT_DIR, self.run_date)                  # data directory for raw data output.
+        self.max_days_lookback = max_days_lookback                                                      # max # of days to look back for data.
+        
+        os.makedirs(self.data_dir, exist_ok=True)                                                       # create data directory if it doesn't exist.
+
+        self.enable_seen_registry = enable_seen_registry                                                # enable seen post registry.
+        self.seen_registry_path = PROCESSED_REDDIT_BY_DAY_DIR.parent / "seen_post_ids.json"             # path to seen post ids registry.
+        self._seen_ids = self._load_seen_ids() if self.enable_seen_registry else set()                  # load seen ids.
 
         # initialize PRAW client
         self.reddit = Reddit(
@@ -100,11 +106,11 @@ class RedditDataCollector:
 
     @staticmethod
     def _build_day_dir(root: Path, run_date: str) -> Path:
-        """Return YYYY/MM/DD folder under the given root."""
+        """return yyyy/mm/dd folder under the given root."""
         try:
             year, month, day = run_date.split("-")
         except ValueError:
-            raise ValueError(f"run_date must be YYYY-MM-DD, got {run_date}")
+            raise ValueError(f"run_date must be yyyy-mm-dd, got {run_date}")
         return root / year / month / day
 
     # =======================================================================
@@ -128,6 +134,20 @@ class RedditDataCollector:
         if sort == "top":
             return subreddit.top(time_filter=self._select_time_filter(), limit=limit)
         return []
+
+    def _load_seen_ids(self) -> set[str]:
+        """grab previously processed post ids to avoid recollecting them."""
+        if not self.enable_seen_registry:
+            return set()
+        if not self.seen_registry_path.exists():
+            return set()
+        try:
+            with open(self.seen_registry_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+                return {str(x) for x in data if x}
+        except Exception as exc:
+            logger.warning(f"unable to load seen ids registry ({exc})")
+            return set()
 
     # -----------------------
     # author metadata helper
@@ -235,6 +255,11 @@ class RedditDataCollector:
             out_rows = []
 
             for post in posts:
+                # skip posts we've already processed in previous runs
+                if self.enable_seen_registry and post.id in self._seen_ids:
+                    continue
+
+                # skip posts that are older than the cutoff date.
                 created = datetime.fromtimestamp(post.created_utc)
                 if created < self.cutoff_date:
                     continue

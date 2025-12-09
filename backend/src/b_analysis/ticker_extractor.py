@@ -40,20 +40,25 @@ from src.utils.config import (
     CONTEXT_REQUIRED_TICKERS,
     VALID_ETFS,
     WELL_KNOWN_TICKERS,
-    STRONG_FINANCE_WORDS,
-    WEAK_FINANCE_WORDS,
+    FINANCE_CONTEXT_WORDS,
+    NEGATIVE_CONTEXT_PATTERNS,
+    COMMON_WORDS,
+    ALWAYS_ALLOW,
 )
 from src.utils.ticker_context_config import TICKER_CONTEXT
 from src.utils.ticker_filters import classify_token
 from .entity_linker import EntityLinker
 
 
+COMMON_WORDS_LOWER = {word.lower() for word in COMMON_WORDS}
+
+
 class TickerExtractor:
     """centralized ticker extraction + validation engine."""
 
     # regular expressions for ticker extraction.
-    RAW_TICKER_REGEX = r"\b[A-Z]{1,5}\b"
-    DOLLAR_TICKER_REGEX = r"\$[A-Za-z]{1,5}"
+    RAW_TICKER_REGEX = r"(?<![A-Za-z0-9\$])[A-Z]{1,5}(?![A-Za-z0-9])"
+    DOLLAR_TICKER_REGEX = r"(?<![A-Za-z0-9\$])\$[A-Za-z]{1,5}(?![A-Za-z0-9])"
 
     # initialize ticker extractor.
     def __init__(self):
@@ -75,12 +80,16 @@ class TickerExtractor:
         tickers = set()
 
         # ---------- 1. dollar-style tickers ($AAPL) ----------
-        for match in re.findall(self.DOLLAR_TICKER_REGEX, text):
-            tickers.add(match.replace("$", "").upper())
+        for match in re.finditer(self.DOLLAR_TICKER_REGEX, text):
+            if not self._has_clean_boundary(text, match.start(), match.end()):
+                continue
+            tickers.add(match.group().replace("$", "").upper())
 
         # ---------- 2. raw uppercase tickers (NVDA, TSLA) ----------
-        for match in re.findall(self.RAW_TICKER_REGEX, text):
-            tickers.add(match.upper())
+        for match in re.finditer(self.RAW_TICKER_REGEX, text):
+            if not self._has_clean_boundary(text, match.start(), match.end()):
+                continue
+            tickers.add(match.group().upper())
 
         validated = []
         base_scores = []
@@ -136,12 +145,13 @@ class TickerExtractor:
         words = re.findall(r"[a-z0-9$]+", text_low)
         evidence: Dict[str, Dict[str, Any]] = {}
 
-        fin_context_words = {
-            w.lower() for w in (STRONG_FINANCE_WORDS | WEAK_FINANCE_WORDS)
-        }
+        fin_context_words = {w.lower() for w in FINANCE_CONTEXT_WORDS}
 
         # iterate through each ticker.
         for ticker in tickers:
+            if self._is_common_word(ticker, text):
+                continue
+
             classification = classify_token(ticker)
             if classification == "blocked":
                 review.append(self._make_review_entry(ticker, "blacklist_filter", text))
@@ -152,6 +162,9 @@ class TickerExtractor:
             if classification == "ignored":
                 continue
             ticker_lower = ticker.lower()
+            if self._matches_negative_context(ticker, text_low):
+                review.append(self._make_review_entry(ticker, "negative_context", text))
+                continue
             # check if the ticker is in the macro terms, WSB slang, WSB finance blacklist, or stock data blacklist.
             if (
                 ticker in MACRO_TERMS
@@ -186,7 +199,7 @@ class TickerExtractor:
             }
 
             # check if the ticker is in the well known tickers or valid ETFs.
-            if ticker in WELL_KNOWN_TICKERS or ticker in VALID_ETFS:
+            if ticker in WELL_KNOWN_TICKERS or ticker in ALWAYS_ALLOW:
                 entry_meta["accept_reason"] = "well_known_ticker"
                 evidence[ticker] = entry_meta
                 clean.append(ticker)
@@ -297,3 +310,46 @@ class TickerExtractor:
             if len(tokens) >= max_tokens:
                 break
         return tokens[:max_tokens]
+
+    @staticmethod
+    def _has_clean_boundary(text: str, start: int, end: int) -> bool:
+        """Ensure the match is not embedded inside a larger word."""
+        def _is_valid_prev(char: str) -> bool:
+            if not char:
+                return True
+            return not char.isalnum() and char != "_"
+
+        def _is_valid_next(char: str) -> bool:
+            if not char:
+                return True
+            return not char.isalnum() and char != "_"
+
+        prev_char = text[start - 1] if start > 0 else ""
+        next_char = text[end] if end < len(text) else ""
+        return _is_valid_prev(prev_char) and _is_valid_next(next_char)
+
+    @staticmethod
+    def _matches_negative_context(ticker: str, text_low: str) -> bool:
+        """Check if the token appears inside known non-financial phrases."""
+        patterns = NEGATIVE_CONTEXT_PATTERNS.get(ticker, [])
+        if not patterns or not text_low:
+            return False
+        return any(pattern in text_low for pattern in patterns)
+
+    @staticmethod
+    def _is_common_word(ticker: str, text: str) -> bool:
+        """Check if the token is a common English word emphasized in uppercase."""
+        if not ticker:
+            return False
+        lower = ticker.lower()
+        if lower in COMMON_WORDS_LOWER:
+            return True
+        if not text:
+            return False
+        text_low = text.lower()
+        pattern = re.compile(rf"\b{re.escape(lower)}\b")
+        for match in pattern.finditer(text_low):
+            original = text[match.start():match.end()]
+            if not original.isupper():
+                return True
+        return False

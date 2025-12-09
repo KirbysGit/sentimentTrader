@@ -101,26 +101,14 @@ WSB_FINANCE_BLACKLIST = {
     "STOCK", "HOT",
     "THREE", "WEEKS", "MINUS", "CARE", "NATO", "ANTH",
     "MAANG", "ROTH", "ESPN", "HBO", "FAQ", "FBI", "GFC", "ATP",
-    "ESOP", "BS", "III", "PS", "LARGE"
+    "ESOP", "BS", "III", "PS", "LARGE",
+    "VOTER", "MUCH", "MORE", "TOKYO", "TL", "TL;DR", "DR",
+    "RFK", "NASA", "NSSL", "OS",
+    "TIME", "LINE", "TURN", "GREAT", "TIS", "XXXXX"
 }
 
-# Symbols we never want heading into stock collection (non-equity, macro)
-STOCK_DATA_BLACKLIST = {
-    "BNPL", "CEO", "CPI", "GDP", "FDA", "USD", "WSB", "NTM", "BTC", "ETH",
-    "WAIT", "TONS", "DYOR", "SEVEN", "WORTH",
-    "LONG", "AFTER", "NEVER", "FIRST", "FEAST",
-    "BETA", "ARPU", "SPAC",
-    "AZURE", "SCION", "NAND", "EPYC", "ASSET",
-    "NYSE", "FTSE", "CNBC",
-    "JATEC", "LBNL", "OPAI",
-    "OPEN",
-    "HYSA",
-    "BMNR",
-    "EBIT",
-    "TILTS",
-    "STOCK",
-    "MAANG", "ROTH", "ESPN", "HBO",
-}
+# unified blocklist used across stages
+BLOCKLIST = WSB_FINANCE_BLACKLIST
 
 # extra stopwords removed after stage 2 to avoid false positives
 FINAL_STAGE_STOPWORDS = {
@@ -140,24 +128,26 @@ SUBREDDIT_TICKERS = {
     'stockmarket': None
 }
 
-# strong financial context words (high confidence)
-STRONG_FINANCE_WORDS = {
+# financial context words (merged strong + weak)
+FINANCE_CONTEXT_WORDS = {
     'stock', 'shares', 'ticker', 'earnings', 'revenue', 'dividend', 'market cap',
     'trading', 'investor', 'bullish', 'bearish', '$', 'calls', 'puts', 'options',
     'portfolio', 'shareholders', 'eps', 'pe ratio', 'market share', 'guidance',
     'analyst', 'upgrade', 'downgrade', 'price target', 'short interest', 'float',
     'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition',
     'sold', 'selling', 'dumped', 'dumping', 'trim', 'trimmed', 'bagged', 'bagging',
-    'positioned', 'positions', 'averaged', 'scaling'
-}
-
-# weak financial context words (lower confidence)
-WEAK_FINANCE_WORDS = {
-    'buy', 'sell', 'price', 'trade', 'invest', 'market', 'portfolio', 'position',
+    'positioned', 'positions', 'averaged', 'scaling', 'volatility', 'assets',
+    'forecast', 's&p', 'sp500',
+    'microgrid', 'microgrids', 'grid', 'grid stability',
+    'distributed energy', 'energy storage', 'industrial power',
+    'batteries', 'battery', 'power applications',
+    'buy', 'sell', 'price', 'trade', 'invest', 'market', 'position',
     'profit', 'loss', 'analysis', 'company', 'corporation', 'inc', 'ltd', 'tech',
     'up', 'down', 'gain', 'drop', 'rise', 'fall', 'quarter', 'growth', 'decline',
     'performance', 'trend', 'sector', 'industry', 'competition', 'partnership',
-    'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy'
+    'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy',
+    'turbulence', 'turbulences',
+    'storage', 'renewables', 'missile', 'missiles'
 }
 
 # sentiment lexicon used by SentimentScorer (extend freely)
@@ -189,7 +179,8 @@ COMMON_WORDS = {
     'NEED', 'MUCH', 'MANY', 'SUCH', 'MOST', 'PART', 'OVER', 'YEAR', 'HELP', 'WORK',
     'LIFE', 'TELL', 'CASE', 'DAYS', 'FIND', 'NEXT', 'LAST', 'WEEK', 'GIVE', 'NAME',
     'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE',
-    'WAIT', 'AFTER', 'LONG', 'FIRST', 'NEVER', 'WORTH', 'SEVEN', 'FEAST'
+    'WAIT', 'AFTER', 'LONG', 'FIRST', 'NEVER', 'WORTH', 'SEVEN', 'FEAST',
+    "TIME", "LINE", "TURN", "GREAT", "TIS",
 }
 
 # etf categories
@@ -209,7 +200,7 @@ ETF_CATEGORIES = {
         'FLOT', 'SGOV', 'VGSH',
     },
     'INTERNATIONAL': {
-        'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT'
+        'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT', 'VXUS'
     },
     'CRYPTO': {
         'IBIT', 'BITB', 'BTCI'
@@ -219,13 +210,8 @@ ETF_CATEGORIES = {
 # flatten etf list for quick lookup
 VALID_ETFS = {etf for category in ETF_CATEGORIES.values() for etf in category}
 
-# extra allow/block lists that sit outside exchange universes
-EXTRA_ALWAYS_ALLOW = {
-    "BTC",
-    "ETH",
-    "SPX",
-    "GOLD",
-}
+# unified allow list (etfs + special non-universe symbols)
+ALWAYS_ALLOW = VALID_ETFS | {"BTC", "ETH", "SPX", "GOLD", "VXUS"}
 
 # well-known stock tickers
 WELL_KNOWN_TICKERS = {
@@ -244,7 +230,7 @@ WELL_KNOWN_TICKERS = {
     'SOND', 'ANF', 'KSS', 'LSEG',
     'ALAB', 'IREN',
     'ESNT', 'PATH', 'CRWD',
-    'DLTR', 'AVGO', 'NEE', 'PLD', 'LLY', 'BUD', 'NQ', 'DASH',
+    'DLTR', 'AVGO', 'NEE', 'PLD', 'LLY', 'BUD', 'NQ', 'DASH', 'BE',
     # newly promoted from review queue
     'WBD', 'BABA', 'BILI', 'WB', 'PDD', 'TAL', 'EDU', 'EDIT',
 }
@@ -264,7 +250,9 @@ NEGATIVE_CONTEXT_PATTERNS = {
     'PUMP': ['pump and dump', 'pump scheme', 'pump group'],
     'HOLD': ['hold on', 'hold up', 'hold tight', 'hold steady'],
     'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank'],
-    'DASH': [' - ', '--', '—', ' – ']
+    'DASH': [' - ', '--', '—', ' – '],
+    'BOT': ['robot', 'bot army', 'chatbot'],
+    'ACA': ['affordable care act', 'aca credits', 'aca subsidies'],
 }
 
 # ambiguous financial tickers that need extra validation

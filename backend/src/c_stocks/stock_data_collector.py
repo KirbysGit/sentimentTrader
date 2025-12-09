@@ -26,11 +26,11 @@ import time
 import logging
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from colorama import Fore, Style
 from src.utils.path_config import RAW_DIR
-from src.utils.config import STOCK_DATA_BLACKLIST
+from src.utils.config import BLOCKLIST
 from src.utils.ticker_aliases import get_alias_chain
 import os
 
@@ -52,6 +52,7 @@ class StockDataCollector:
         self.start_date: Optional[str] = None
         self.end_date: Optional[str] = None
         self.available_data: Dict[str, pd.DataFrame] = {}
+        self._failed_symbols: set[str] = set()
 
     # -----------------------------------------------------------------------------------------------
 
@@ -65,7 +66,7 @@ class StockDataCollector:
 
         filtered = [
             s for s in unique_symbols
-            if s not in STOCK_DATA_BLACKLIST and s.isalpha() and 1 <= len(s) <= 5
+            if s not in BLOCKLIST and s.isalpha() and 1 <= len(s) <= 5
         ]
         dropped = sorted(set(unique_symbols) - set(filtered))
         if not filtered:
@@ -106,23 +107,59 @@ class StockDataCollector:
 
         # iterate through each symbol.
         for symbol in self.symbols:
+            existing = self._load_existing(symbol)
+            existing_min = existing["Date"].min().date() if not existing.empty else None
+            existing_max = existing["Date"].max().date() if not existing.empty else None
+
+            req_start = self._date_or_none(self.start_date)
+            req_end = self._date_or_none(self.end_date)
+            fetch_start = req_start
+
+            # fully covered → skip.
+            if (
+                existing_min
+                and existing_max
+                and req_start
+                and req_end
+                and req_start >= existing_min
+                and req_end <= existing_max
+            ):
+                print(f"{Fore.GREEN}✓ {symbol}: skip (already have {existing_min} → {existing_max}){Style.RESET_ALL}")
+                self.available_data[symbol] = existing
+                continue
+
+            # partially covered → fetch only the gap.
+            if existing_max and req_start:
+                next_day = existing_max + timedelta(days=1)
+                fetch_start = max(req_start, next_day)
+
+            if req_end and fetch_start and fetch_start > req_end:
+                print(f"{Fore.GREEN}✓ {symbol}: nothing new to fetch (existing through {existing_max}){Style.RESET_ALL}")
+                self.available_data[symbol] = existing
+                continue
+
             # get the alias chain.
             alias_chain = get_alias_chain(symbol)
             # initialize the dataframe and source symbol.
-            df = None
+            df = existing if not existing.empty else None
             source_symbol = None
 
             # iterate through each candidate.
             for candidate in alias_chain:
+                if candidate in self._failed_symbols:
+                    continue
                 # fetch the data with retry.
-                candidate_df = self._fetch_with_retry(candidate)
+                candidate_df = self._fetch_with_retry(candidate, start_date=fetch_start, end_date=req_end)
                 if candidate_df is None or candidate_df.empty:
+                    self._failed_symbols.add(candidate)
                     continue
 
                 # validate and clean the data.
                 candidate_df = self._validate_and_clean_data(candidate_df, candidate)
-                if len(candidate_df) < 60:
-                    continue
+                # merge with existing cache
+                if existing is not None and not existing.empty:
+                    candidate_df = pd.concat([existing, candidate_df], ignore_index=True)
+                candidate_df = candidate_df.drop_duplicates(subset=["Date"]).sort_values("Date")
 
                 # set the dataframe and source symbol.
                 df = candidate_df
@@ -156,13 +193,23 @@ class StockDataCollector:
     
     # -----------------------------------------------------------------------------------------------
     
-    def _fetch_with_retry(self, symbol: str, max_retries: int = 3) -> Optional[pd.DataFrame]:
+    def _fetch_with_retry(
+        self,
+        symbol: str,
+        start_date: Optional[datetime.date] = None,
+        end_date: Optional[datetime.date] = None,
+        max_retries: int = 3,
+    ) -> Optional[pd.DataFrame]:
         """fetch data with retry mechanism."""
         for attempt in range(max_retries):
             try:
                 stock = yf.Ticker(symbol)
                 # fetch the data.
-                df = stock.history(start=self.start_date, end=self.end_date, interval='1d')
+                df = stock.history(
+                    start=start_date or self.start_date,
+                    end=end_date or self.end_date,
+                    interval='1d'
+                )
 
                 # check if the dataframe is empty.
                 if df.empty:
@@ -253,6 +300,28 @@ class StockDataCollector:
         
         logger.debug(f"stock data saved to: {output_file}")
         logger.debug(f"metadata saved to: {metadata_file}")
+
+    # -----------------------------------------------------------------------------------------------
+
+    def _load_existing(self, symbol: str) -> pd.DataFrame:
+        """Load existing cached data for incremental fetches."""
+        path = self.data_dir / f"{symbol}_stock_data.csv"
+        if not path.exists():
+            return pd.DataFrame()
+        try:
+            df = pd.read_csv(path, parse_dates=["Date"])
+            return df if not df.empty else pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+
+    @staticmethod
+    def _date_or_none(val: Optional[str]):
+        if not val:
+            return None
+        try:
+            return datetime.strptime(val, "%Y-%m-%d").date()
+        except Exception:
+            return None
 
     def get_available_tickers(self) -> List[str]:
         """return list of tickers that produced valid stock data."""

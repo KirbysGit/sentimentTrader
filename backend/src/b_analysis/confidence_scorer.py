@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Tuple
 
 
 class ConfidenceScorer:
-    """Heuristic confidence aggregator for ticker mentions."""
+    """heuristic confidence aggregator for ticker mentions."""
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class ConfidenceScorer:
 
     # ------------------------------------------------------------------
     def score(self, ticker: str, base_score: float, evidence: Dict[str, Any]) -> Tuple[float, str]:
-        """Return a calibrated confidence + short explanation string."""
+        """return a calibrated confidence + short explanation string."""
         score = base_score or 0.0
         notes: List[str] = []
         evidence = evidence or {}
@@ -75,7 +75,7 @@ class ConfidenceScorer:
     # ------------------------------------------------------------------
     @staticmethod
     def _short_list(items: List[str], limit: int = 3) -> str:
-        """Return comma-separated subset for compact logging."""
+        """return comma-separated subset for compact logging."""
         unique = []
         for item in items:
             if item not in unique:

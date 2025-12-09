@@ -33,9 +33,9 @@ from src.utils.config import (
     MACRO_TERMS,
     WSB_SLANG,
     CONTEXT_REQUIRED_TICKERS,
-    STOCK_DATA_BLACKLIST,
+    BLOCKLIST,
     COMMON_WORDS,
-    VALID_ETFS,
+    ALWAYS_ALLOW,
 )
 from src.utils.ticker_aliases import TICKER_ALIASES
 from src.utils.ticker_context_config import TICKER_CONTEXT, CONTEXT_BLACKLIST
@@ -50,8 +50,8 @@ class EntityLinker:
 
     def __init__(self):
         """initialize entity linker with common word blacklist and ETF whitelist."""
-        self.common_word_blacklist = set(COMMON_WORDS)
-        self.etf_whitelist = set(VALID_ETFS)
+        self.common_words = set(COMMON_WORDS)
+        self.etf_whitelist = set(ALWAYS_ALLOW)
 
         self.ticker_context = TICKER_CONTEXT
         self.context_blacklist = CONTEXT_BLACKLIST
@@ -76,11 +76,11 @@ class EntityLinker:
                 return True, 1.0, {"linker_reason": "etf_whitelist"}
 
         # 2. blacklist = invalid
-        if ticker in self.common_word_blacklist:
+        if ticker in self.common_words:
             return False, 0.0, {"linker_reason": "common_word"}
         if ticker in MACRO_TERMS or ticker in WSB_SLANG:
             return False, 0.0, {"linker_reason": "macro_or_slang"}
-        if ticker in STOCK_DATA_BLACKLIST:
+        if ticker in BLOCKLIST:
             return False, 0.0, {"linker_reason": "stock_blacklist"}
 
         # 3. context blacklist overrides everything.

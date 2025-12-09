@@ -51,12 +51,12 @@ from src.utils.path_config import (
     DIAGNOSTICS_DIR,
 )
 from src.utils.config import (
-    STOCK_DATA_BLACKLIST,
+    BLOCKLIST,
     WELL_KNOWN_TICKERS,
     VALID_ETFS,
+    ALWAYS_ALLOW,
     FINAL_STAGE_STOPWORDS,
-    STRONG_FINANCE_WORDS,
-    WEAK_FINANCE_WORDS,
+    FINANCE_CONTEXT_WORDS,
 )
 from src.utils.ticker_aliases import get_canonical_alias_map
 
@@ -71,6 +71,7 @@ class RedditDataProcessor:
         "entity_linker_reject",  
         "timestamp_et",
         "unknown_symbol",
+        "negative_context",
     }
 
     # minimal feature columns that move forward to Stage 3 / feature builder.
@@ -103,17 +104,19 @@ class RedditDataProcessor:
 
     PORTFOLIO_KEYWORDS = (
         "my portfolio",
+        "portfolio:",
+        "current portfolio",
         "portfolio allocation",
         "allocation",
+        "allocated",
         "allocations",
         "my holdings",
         "holdings:",
+        "my positions",
         "positions:",
         "exposure",
         "weighting",
         "weights",
-        "percent",
-        "%",
     )
 
     WATCHLIST_KEYWORDS = (
@@ -127,41 +130,27 @@ class RedditDataProcessor:
         "ticker summary",
     )
 
-    POSITION_LANGUAGE_PHRASES = (
-        "i'm long",
-        "im long",
-        "i am long",
-        "going long",
-        "went long",
-        "long on",
-        "i'm short",
-        "im short",
-        "going short",
-        "shorting",
-        "buying",
-        "bought",
-        "accumulating",
-        "adding",
-        "sold",
-        "selling",
-        "trimmed",
-        "taking profit",
-        "price target",
-        "pt of",
-        "entry at",
-        "entry price",
-        "exit at",
-        "stop loss",
-        "covered call",
-        "covered calls",
-        "writing calls",
-        "selling calls",
-        "selling puts",
-        "bought calls",
-        "bought puts",
-        "calls expiring",
-        "puts expiring",
-        "leaps",
+    STRONG_POSITION_PATTERNS = (
+        r"\bi(?:\s*(am|’m|'m|m))?\s+long\b",
+        r"\bi(?:\s*(am|’m|'m|m))?\s+short\b",
+        r"\bi\s+(bought|bought in|loaded|went in|got in)\b",
+        r"\bi\s+(sold|dumped|trimmed|got out of)\b",
+        r"\bmy\s+(position|positions|shares|calls|puts)\b",
+        r"\bstill\s+holding\b",
+        r"\bbagholding\b",
+        r"\bi\s+hold\b",
+        r"\bi\s+own\b",
+        r"\bi\s+added\b",
+        r"\bi\s+trimmed\b",
+        r"\bi\s+took\s+profit\b",
+    )
+
+    WEAK_POSITION_PATTERNS = (
+        r"\bbet(?:ting)?\s+on\b",
+        r"\bplay(?:ing)?\b",
+        r"\blooking\s+to\s+(buy|sell)\b",
+        r"\bthinking\s+of\s+(buying|selling)\b",
+        r"\bmoney\s+to\s+be\s+made\b",
     )
 
     # initialize reddit data processor.
@@ -188,9 +177,7 @@ class RedditDataProcessor:
         self.entity_linker = EntityLinker()
         self.sentiment_scorer = SentimentScorer()
         self.confidence_scorer = ConfidenceScorer()
-        self.finance_keywords = {
-            kw.lower() for kw in (STRONG_FINANCE_WORDS | WEAK_FINANCE_WORDS)
-        }
+        self.finance_keywords = {kw.lower() for kw in FINANCE_CONTEXT_WORDS}
         self.canonical_alias_map = get_canonical_alias_map()
 
         # optional seen-post registry hooks (disabled for now)
@@ -297,13 +284,15 @@ class RedditDataProcessor:
         if not text:
             return False
         text_low = text.lower()
-        for phrase in self.POSITION_LANGUAGE_PHRASES:
-            if phrase in text_low:
+        for pattern in self.STRONG_POSITION_PATTERNS:
+            if re.search(pattern, text_low):
                 return True
-        if re.search(r"\b(long|short)\s+\$?[a-z]{1,5}\b", text_low):
-            return True
-        if re.search(r"\b(buy|sell|calls?|puts?)\b", text_low):
-            return True
+        # weak signals require first-person ownership context
+        if not re.search(r"\b(i|my|we|our|me|us)\b", text_low):
+            return False
+        for pattern in self.WEAK_POSITION_PATTERNS:
+            if re.search(pattern, text_low):
+                return True
         return False
 
     def _is_portfolio_post(self, text: str, tickers: List[str]) -> bool:
@@ -311,12 +300,10 @@ class RedditDataProcessor:
         if not text:
             return False
         text_low = text.lower()
-        if any(keyword in text_low for keyword in self.PORTFOLIO_KEYWORDS):
+        num_tickers = len(tickers or [])
+        if num_tickers >= 3 and "%" in text:
             return True
-        percent_hits = len(re.findall(r"\d{1,3}\s*%", text))
-        if percent_hits >= 2 and len(tickers) >= 3:
-            return True
-        if "portfolio" in text_low and len(tickers) >= 3:
+        if num_tickers >= 2 and any(keyword in text_low for keyword in self.PORTFOLIO_KEYWORDS):
             return True
         return False
 
@@ -421,13 +408,13 @@ class RedditDataProcessor:
             engagement = float(engagement_val) if pd.notna(engagement_val) else 0.0
             sentiment = float(sentiment_val) if pd.notna(sentiment_val) else 0.0
             is_relevant = bool(row.get("is_relevant", False))
-             title_flags = row.get("ticker_in_title", []) or []
-             num_tickers = int(row.get("num_tickers_in_post") or len(tickers) or 0)
-             if num_tickers <= 0:
-                 num_tickers = len(tickers)
-             is_portfolio_post = bool(row.get("is_portfolio_post", False))
-             is_watchlist_post = bool(row.get("is_watchlist_post", False))
-             has_position_language = bool(row.get("has_position_language", False))
+            title_flags = row.get("ticker_in_title", []) or []
+            num_tickers = int(row.get("num_tickers_in_post") or len(tickers) or 0)
+            if num_tickers <= 0:
+                num_tickers = len(tickers)
+            is_portfolio_post = bool(row.get("is_portfolio_post", False))
+            is_watchlist_post = bool(row.get("is_watchlist_post", False))
+            has_position_language = bool(row.get("has_position_language", False))
             if len(tickers) != len(scores):
                 min_len = min(len(tickers), len(scores))
                 tickers = tickers[:min_len]
@@ -437,14 +424,14 @@ class RedditDataProcessor:
                 title_flags = title_flags[: len(tickers)]
 
             for idx, (ticker, score) in enumerate(zip(tickers, scores)):
-                 in_title = bool(title_flags[idx]) if idx < len(title_flags) else False
-                 weight = self._compute_ticker_weight(
-                     num_tickers=num_tickers,
-                     in_title=in_title,
-                     is_portfolio_post=is_portfolio_post,
-                     is_watchlist_post=is_watchlist_post,
-                     has_position_language=has_position_language,
-                 )
+                in_title = bool(title_flags[idx]) if idx < len(title_flags) else False
+                weight = self._compute_ticker_weight(
+                    num_tickers=num_tickers,
+                    in_title=in_title,
+                    is_portfolio_post=is_portfolio_post,
+                    is_watchlist_post=is_watchlist_post,
+                    has_position_language=has_position_language,
+                )
                 rows.append(
                     {
                         "date": row["date"],
@@ -453,15 +440,15 @@ class RedditDataProcessor:
                         "engagement": engagement,
                         "sentiment": sentiment,
                         "is_relevant": is_relevant,
-                         "weight": weight,
-                         "in_title": in_title,
-                         "has_position_language": has_position_language,
-                         "is_portfolio_post": is_portfolio_post,
-                         "is_watchlist_post": is_watchlist_post,
-                         "num_tickers_in_post": num_tickers,
-                         "weighted_engagement": engagement * weight,
-                         "weighted_sentiment": sentiment * weight,
-                         "weighted_sentiment_eng": sentiment * engagement * weight,
+                        "weight": weight,
+                        "in_title": in_title,
+                        "has_position_language": has_position_language,
+                        "is_portfolio_post": is_portfolio_post,
+                        "is_watchlist_post": is_watchlist_post,
+                        "num_tickers_in_post": num_tickers,
+                        "weighted_engagement": engagement * weight,
+                        "weighted_sentiment": sentiment * weight,
+                        "weighted_sentiment_eng": sentiment * engagement * weight,
                     }
                 )
 
@@ -611,11 +598,29 @@ class RedditDataProcessor:
         if not review_items:
             return
 
+        # de-duplicate review entries to avoid repeat noise across runs.
+        # use post_id + ticker + reason as a stable key.
+        seen_keys = set()
+        deduped: List[dict] = []
+        prior_seen_ids = self._seen_ids if self.enable_seen_registry else set()
+        for item in review_items:
+            post_id = item.get("post_id")
+            if post_id and post_id in prior_seen_ids:
+                continue  # already processed in a previous run
+            key = (post_id, item.get("ticker"), item.get("reason"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(item)
+
+        if not deduped:
+            return
+
         out = self.review_queue_path
         out.parent.mkdir(parents=True, exist_ok=True)
 
         with open(out, "w", encoding="utf-8") as f:
-            json.dump(review_items, f, indent=2, default=str)
+            json.dump(deduped, f, indent=2, default=str)
 
         print(f"{Fore.GREEN}✓ wrote ticker review queue → {self._format_path(out)}{Style.RESET_ALL}")
 
@@ -695,9 +700,9 @@ class RedditDataProcessor:
         ticker_up = ticker.upper()
         if ticker_up in FINAL_STAGE_STOPWORDS:
             return False
-        if ticker_up in STOCK_DATA_BLACKLIST:
+        if ticker_up in BLOCKLIST:
             return False
-        if ticker_up in WELL_KNOWN_TICKERS or ticker_up in VALID_ETFS:
+        if ticker_up in WELL_KNOWN_TICKERS or ticker_up in ALWAYS_ALLOW or ticker_up in VALID_ETFS:
             return True
         if len(ticker_up) <= 3:
             return False
