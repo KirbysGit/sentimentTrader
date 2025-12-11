@@ -92,7 +92,7 @@ class RedditDataCollector:
         self.seen_registry_path = PROCESSED_REDDIT_BY_DAY_DIR.parent / "seen_post_ids.json"             # path to seen post ids registry.
         self._seen_ids = self._load_seen_ids() if self.enable_seen_registry else set()                  # load seen ids.
 
-        # initialize PRAW client
+        # initialize PRAW client.
         self.reddit = Reddit(
             client_id=os.getenv("REDDIT_CLIENT_ID"),
             client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
@@ -191,6 +191,7 @@ class RedditDataCollector:
         cross_parent = None
         cross_subreddit = None
 
+        # if its a crosspost, extract parent post id & subreddit.
         if is_cross:
             try:
                 cp = post.crosspost_parent_list[0]
@@ -255,7 +256,7 @@ class RedditDataCollector:
             out_rows = []
 
             for post in posts:
-                # skip posts we've already processed in previous runs
+                # skip posts we've already processed in previous runs.
                 if self.enable_seen_registry and post.id in self._seen_ids:
                     continue
 
@@ -265,8 +266,7 @@ class RedditDataCollector:
                     continue
 
                 # author metadata.
-                author_name, author_karma, author_is_mod, author_created = \
-                    self._extract_author_info(post)
+                author_name, author_karma, author_is_mod, author_created = self._extract_author_info(post)
 
                 # post media metadata.
                 media_info = self._extract_post_media_info(post)
@@ -342,6 +342,7 @@ class RedditDataCollector:
             .drop_duplicates(subset=["id"])
             .sort_values("created_utc", ascending=False)
         )
+
 
         filename = f"reddit_posts_{self.run_id}.csv"
         output_path = self.data_dir / filename

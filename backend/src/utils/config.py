@@ -104,7 +104,9 @@ WSB_FINANCE_BLACKLIST = {
     "ESOP", "BS", "III", "PS", "LARGE",
     "VOTER", "MUCH", "MORE", "TOKYO", "TL", "TL;DR", "DR",
     "RFK", "NASA", "NSSL", "OS",
-    "TIME", "LINE", "TURN", "GREAT", "TIS", "XXXXX"
+    "TIME", "LINE", "TURN", "GREAT", "TIS", "XXXXX",
+    # newly observed false positives
+    "DYOR",
 }
 
 # unified blocklist used across stages

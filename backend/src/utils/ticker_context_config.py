@@ -79,5 +79,6 @@ CONTEXT_BLACKLIST = {
     "FTSE": ["index", "ftse 100", "ftse 250"],
     "CNBC": ["tv", "anchor", "interview", "network"],
     "ADP": ["jobs report", "employment report", "labor market", "private employers","payroll data", "adp numbers", "jobs data"],
+    "BETA": ["high beta", "low beta", "market beta", "portfolio beta", "beta exposure", "beta risk", "beta adjustment"],
 }
 

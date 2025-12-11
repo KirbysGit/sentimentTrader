@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 from colorama import Fore, Style
-from typing import List, Iterable, Optional
+from typing import List, Iterable, Optional, Tuple
 
 # local imports.
 from src.b_analysis.entity_linker import EntityLinker
@@ -157,12 +157,12 @@ class RedditDataProcessor:
     def __init__(self, input_files: Optional[Iterable[Path]] = None, run_date: Optional[str] = None, run_id: Optional[str] = None):
         print(f"{Fore.CYAN}initializing reddit data processor...{Style.RESET_ALL}")
 
-        self._run_ts = datetime.now(timezone.utc)
-        self.run_date = run_date or self._run_ts.date().isoformat()
-        self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")
-        self.raw_count = 0
+        self._run_ts = datetime.now(timezone.utc)                                                       # run timestamp.
+        self.run_date = run_date or self._run_ts.date().isoformat()                                     # run date.
+        self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")                                  # run id.
+        self.raw_count = 0                                                                              # raw count.
 
-        self.input_files = [Path(p) for p in input_files] if input_files else []
+        self.input_files = [Path(p) for p in input_files] if input_files else []                        # input files.
         self.raw_root = RAW_REDDIT_DIR
         self.raw_day_dir = self._build_day_dir(self.raw_root, self.run_date)
 
@@ -244,15 +244,7 @@ class RedditDataProcessor:
     # ------------------------------------------------------------
     # cleaning
     # ------------------------------------------------------------
-    def _clean_text(self, text: str) -> str:
-        """clean text by removing urls, newlines, and extra whitespace."""
-        if not isinstance(text, str):
-            return ""
-        text = re.sub(r"http\S+", "", text)
-        text = re.sub(r"[\n\r\t]+", " ", text)
-        text = re.sub(r"\s{2,}", " ", text).strip()
-        return text
-
+    
     def _canonicalize_ticker(self, ticker: str) -> str:
         """normalize a ticker using the alias map, defaulting to uppercase original."""
         if ticker is None:
@@ -280,14 +272,19 @@ class RedditDataProcessor:
         return text[start:end].strip()
 
     def _has_position_language(self, text: str) -> bool:
-        """Detect whether the post discusses specific trade positioning."""
+        """detect if the post discusses specific trade positioning."""
+
+        # if text is empty, return False.
         if not text:
             return False
         text_low = text.lower()
+
+        # check for strong position patterns.
         for pattern in self.STRONG_POSITION_PATTERNS:
             if re.search(pattern, text_low):
                 return True
-        # weak signals require first-person ownership context
+
+        # weak signals require first-person ownership context.
         if not re.search(r"\b(i|my|we|our|me|us)\b", text_low):
             return False
         for pattern in self.WEAK_POSITION_PATTERNS:
@@ -354,6 +351,10 @@ class RedditDataProcessor:
         elif num_tickers == 1:
             weight *= 1.2
 
+        # heavily downweight long watchlists so each ticker has minimal influence
+        if is_watchlist_post and num_tickers >= 8:
+            weight *= 1.0 / num_tickers
+
         if is_portfolio_post:
             weight *= 0.3
         if is_watchlist_post:
@@ -373,16 +374,6 @@ class RedditDataProcessor:
         columns = [col for col in self.PROCESSED_OUTPUT_COLUMNS if col in df.columns]
         return df[columns]
 
-    # ------------------------------------------------------------
-    # financial relevance heuristic
-    # ------------------------------------------------------------
-    def _is_financial_post(self, text: str) -> bool:
-        """determine if a post is financial relevant based on keywords."""
-        if not text:
-            return False
-
-        text_low = text.lower()
-        return any(keyword in text_low for keyword in self.finance_keywords)
 
     # ------------------------------------------------------------
     # core processing
@@ -733,114 +724,186 @@ class RedditDataProcessor:
             """
         )
 
-    # ------------------------------------------------------------
-    def process(self) -> pd.DataFrame:
-        """load run-specific raw reddit files → produce daily processed output."""
+    
+    # step 1 - get the raw files.
+    def _get_raw_files(self) -> List[Path]:
         raw_files = [path for path in self.input_files if Path(path).exists()]
         if not raw_files:
             raw_files = sorted(self.raw_day_dir.glob("reddit_posts_*.csv"))
-
         if not raw_files:
             print(f"{Fore.RED}✗ no raw reddit files found in {self.raw_day_dir}{Style.RESET_ALL}")
-            return pd.DataFrame()
+        return raw_files
+    
+    # step 2 - read each raw reddit file.
+    
+    # step 3 - add all the files together to a single dataframe. 
+    
+    # step 4 - deduplicate and filter our seen posts.
+    def _dedupe_and_filter_seen(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], int]:
+        """
+        normalize ids, drop duplicates, and filter out already-seen posts.
+        returns: (filtered_df, processed_ids_all, skipped_count)
+        """
+        if "id" not in df.columns or df.empty:
+            return df, [], 0
 
-        dfs = []
-        # read each raw reddit file.
-        for f in raw_files:
-            try:
-                df = pd.read_csv(f)
-                dfs.append(df)
-            except Exception as e:
-                print(f"{Fore.RED}error reading {f}: {e}{Style.RESET_ALL}")
+        # copy the dataframe and normalize the ids.
+        df = df.copy()
+        df["id"] = df["id"].astype(str)
 
-        if not dfs:
-            return pd.DataFrame()
+        # drop duplicates.
+        df = df.drop_duplicates(subset="id")
 
-        # concatenate all raw reddit files.
-        df = pd.concat(dfs, ignore_index=True)
-        self.raw_count = len(df)
-        if "id" in df.columns:
-            df["id"] = df["id"].astype(str)
-            df = df.drop_duplicates(subset="id")
-            if self.enable_seen_registry and self._seen_ids:
-                before_seen_filter = len(df)
-                df = df[~df["id"].isin(self._seen_ids)]
-                skipped = before_seen_filter - len(df)
-                if skipped > 0:
-                    print(
-                        f"{Fore.YELLOW}⟳ skipped {skipped} previously processed posts (seen registry){Style.RESET_ALL}"
-                    )
-        print(f"{Fore.GREEN}✓ loaded {len(df)} raw posts{Style.RESET_ALL}")
+        # filter out already-seen posts.
+        skipped = 0
+        if self.enable_seen_registry and self._seen_ids:
+            before_seen_filter = len(df)
+            df = df[~df["id"].isin(self._seen_ids)]
+            skipped = before_seen_filter - len(df)
+            if skipped > 0:
+                print(
+                    f"{Fore.YELLOW}⟳ skipped {skipped} previously processed posts (seen registry){Style.RESET_ALL}"
+                )
 
-        text_col = "text" if "text" in df.columns else "selftext"
+        # get the processed ids.
+        processed_ids_all = df["id"].dropna().astype(str).tolist()
+        return df, processed_ids_all, skipped
 
-        # clean text.
-        df["cleaned_text"] = df[text_col].fillna("") + " " + df["title"].fillna("")
-        df["cleaned_text"] = df["cleaned_text"].apply(self._clean_text)
+    # step 5 - clean the text using regex.
+    def _clean_text(self, text: str) -> str:
+        """clean text by removing urls, newlines, and extra whitespace."""
+        if not isinstance(text, str):
+            return ""
+        text = re.sub(r"http\S+", "", text)
+        text = re.sub(r"[\n\r\t]+", " ", text)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        return text
 
-        # determine if the post is relevant.
-        df["is_relevant"] = df["cleaned_text"].apply(self._is_financial_post)
+    # step 6 - determine if post is financially relevant based on keywords.
+    def _is_financial_post(self, text: str) -> bool:
+        """determine if a post is financial relevant based on keywords."""
+        if not text:
+            return False
 
-        # score the sentiment of the post.
-        df["sentiment"] = df["cleaned_text"].apply(self.sentiment_scorer.score)
+        text_low = text.lower()
+        return any(keyword in text_low for keyword in self.finance_keywords)
 
-        # calculate the engagement of the post.
-        df["engagement"] = df["score"].fillna(0) + df["num_comments"].fillna(0)
+    # step 7 - score the sentiment of the post referencing our sentiment_scorer.py.
 
-        # extract tickers and confidence.
-        tickers_list = []
-        scores_list = []
-        confidence_reasons_list = []
+    # step 8 - calculate engagement of post. WIP...
+    
+    # step 9 - extract tickers and confidence.
+    def _process_post_row(self, row: pd.Series, text_col: str) -> Tuple[List[str], List[float], List[str], List[bool], int, bool, bool, bool, List[dict]
+    ]:
+        """
+        extract/validate tickers for a single post row and return structured outputs.
+        returns: (tickers, scores, confidence_notes, title_flags, num_tickers, is_portfolio_post, is_watchlist_post, has_position_language, filtered_review)
+        """
+        # --- 1. get the text and title.
+        text = row.get("cleaned_text", "")
+        title_text = row.get("title") or ""
+        body_raw = row.get(text_col, "")
+        raw_context_text = f"{title_text}\n{body_raw}" if isinstance(body_raw, str) else str(title_text or "")
+
+        # --- 2. extract the tickers.
+        tks, base_scores, review_items, evidence_items = self.extractor.extract_tickers(text)
+        base_scores = [float(s) if (s is not None and s != "") else 0.0 for s in base_scores]
+
+        # --- 3. score the tickers.
+        final_scores: List[float] = []
+        confidence_notes: List[str] = []
+        if tks:
+            # score each with confidence scorer.
+            for ticker, base_score, evidence in zip(tks, base_scores, evidence_items):
+                scored_value, summary = self.confidence_scorer.score(ticker, base_score, evidence)
+                final_scores.append(scored_value)
+                confidence_notes.append(summary)
+
+        # --- 4. canonicalize and drop empties; keep scores/notes aligned.
+        canonical_tks: List[str] = []
+        canonical_scores: List[float] = []
+        canonical_notes: List[str] = []
+        for ticker, score, note in zip(tks, final_scores, confidence_notes):
+            canonical = self._canonicalize_ticker(ticker)
+            if not canonical:
+                continue
+            canonical_tks.append(canonical)
+            canonical_scores.append(score)
+            canonical_notes.append(note)
+
+        tks = canonical_tks
+        scs = canonical_scores
+        note_sequence = canonical_notes
+
+        # --- 5. determine if the post has position language.
+        has_position_language = self._has_position_language(raw_context_text)
+
+        # --- 6. determine if the post is a portfolio post.
+        is_portfolio_post = self._is_portfolio_post(raw_context_text, tks)
+
+        # --- 7. determine if the post is a watchlist post.
+        is_watchlist_post = self._is_watchlist_post(raw_context_text, tks, has_position_language)
+
+        # --- 8. determine if the tickers are in the title.
+        title_flags = self._ticker_in_title_flags(title_text, tks)
+
+        # --- 9. count the number of tickers in the post.
+        num_tickers = len(tks)
+
+        # --- 10. filter the review items.
+        filtered_review = [
+            item for item in review_items
+            if item.get("reason") in self.REVIEW_ALLOWED_REASONS
+        ]
+
+        # --- 11. return the results.
+        return (
+            tks,
+            scs,
+            note_sequence,
+            title_flags,
+            num_tickers,
+            is_portfolio_post,
+            is_watchlist_post,
+            has_position_language,
+            filtered_review,
+        )
+
+    def _process_posts(self, df: pd.DataFrame, text_col: str) -> Tuple[
+        List[List[str]], List[List[float]], List[List[str]], List[List[bool]], List[int], List[bool], List[bool], List[bool], List[dict]
+    ]:
+        """
+        process all posts: extract/score/flag tickers and collect review items.
+        returns all per-column lists plus the review_queue entries.
+        """
+
+        # initialize all our lists.
+        tickers_list: List[List[str]] = []
+        scores_list: List[List[float]] = []
+        confidence_reasons_list: List[List[str]] = []
         ticker_in_title_flags_list: List[List[bool]] = []
         num_ticker_counts: List[int] = []
         portfolio_post_flags: List[bool] = []
         watchlist_post_flags: List[bool] = []
         position_language_flags: List[bool] = []
-        review_queue = []
+        review_queue: List[dict] = []
 
-        # iterate through each row of the dataframe.
+        # process each row.
         for _, row in df.iterrows():
-            text = row.get("cleaned_text", "")
-            title_text = row.get("title") or ""
-            body_raw = row.get(text_col, "")
-            raw_context_text = f"{title_text}\n{body_raw}" if isinstance(body_raw, str) else str(title_text or "")
-            tks, base_scores, review_items, evidence_items = self.extractor.extract_tickers(text)
-            base_scores = [float(s) if (s is not None and s != "") else 0.0 for s in base_scores]
+            # extract/score/flag tickers and collect review items.
+            (
+                tks,
+                scs,
+                note_sequence,
+                title_flags,
+                num_tickers,
+                is_portfolio_post,
+                is_watchlist_post,
+                has_position_language,
+                review_items_filtered,
+            ) = self._process_post_row(row, text_col)
 
-            final_scores: List[float] = []
-            confidence_notes: List[str] = []
-            if tks:
-                for ticker, base_score, evidence in zip(tks, base_scores, evidence_items):
-                    scored_value, summary = self.confidence_scorer.score(ticker, base_score, evidence)
-                    final_scores.append(scored_value)
-                    confidence_notes.append(summary)
-
-            approved_tickers: List[str] = []
-            approved_scores: List[float] = []
-            approved_notes: List[str] = []
-            for ticker, score, note in zip(tks, final_scores, confidence_notes):
-                if not self._allow_final_ticker(ticker):
-                    continue
-                canonical = self._canonicalize_ticker(ticker)
-                approved_tickers.append(canonical)
-                approved_scores.append(score)
-                approved_notes.append(note)
-
-            if approved_tickers:
-                tks = approved_tickers
-                scs = approved_scores
-                note_sequence = approved_notes
-            else:
-                tks, scs = [], []
-                note_sequence = []
-
-            has_position_language = self._has_position_language(raw_context_text)
-            is_portfolio_post = self._is_portfolio_post(raw_context_text, tks)
-            is_watchlist_post = self._is_watchlist_post(raw_context_text, tks, has_position_language)
-            title_flags = self._ticker_in_title_flags(title_text, tks)
-            num_tickers = len(tks)
-
-            # append the tickers and scores to the lists.
+            # append the results to our lists.
             tickers_list.append(tks)
             scores_list.append(scs)
             confidence_reasons_list.append(note_sequence)
@@ -850,31 +913,90 @@ class RedditDataProcessor:
             watchlist_post_flags.append(is_watchlist_post)
             position_language_flags.append(has_position_language)
 
-            # filter the review items.
-            filtered_review = [
-                item for item in review_items
-                if item.get("reason") in self.REVIEW_ALLOWED_REASONS
-            ]
-
-            # build the base metadata.
-            if filtered_review:
+            # if we have review items, build the review queue.
+            if review_items_filtered:
+                # build the base metadata.
                 base_meta = {
                     "post_id": row.get("id"),
                     "subreddit": row.get("subreddit"),
                     "score": row.get("score"),
                     "engagement": row.get("engagement"),
-                    "full_text": (text if isinstance(text, str) else ""),
+                    "full_text": (row.get("cleaned_text") or ""),
                     "title": row.get("title"),
                 }
-                # append the enriched review items to the review queue.
-                for item in filtered_review:
+                # build the enriched review items.
+                for item in review_items_filtered:
                     snippet = self._build_ticker_snippet(
-                        text if isinstance(text, str) else "",
+                        base_meta["full_text"],
                         item.get("ticker", ""),
                         radius=30,
                     )
                     enriched = {**item, **base_meta, "text_excerpt": snippet}
                     review_queue.append(enriched)
+
+        return (
+            tickers_list,
+            scores_list,
+            confidence_reasons_list,
+            ticker_in_title_flags_list,
+            num_ticker_counts,
+            portfolio_post_flags,
+            watchlist_post_flags,
+            position_language_flags,
+            review_queue,
+        )
+    
+    # ---- THE MEAT OF THE PROCESSING ----
+    def process(self) -> pd.DataFrame:
+
+        # ---------------------- 1. get raw files ----------------------
+        raw_files = self._get_raw_files()
+        if not raw_files:
+            return pd.DataFrame()
+
+        # ---------------------- 2. read each raw reddit file ----------------------
+        dfs = []
+        for f in raw_files:
+                df = pd.read_csv(f)
+                dfs.append(df)
+
+        if not dfs:
+            return pd.DataFrame()
+
+        # ---------------------- 3. concatenate all raw reddit files ----------------------
+        df = pd.concat(dfs, ignore_index=True)
+        self.raw_count = len(df)
+
+        # ---------------------- 4. deduplicate by id ----------------------
+        df, processed_ids_all, _ = self._dedupe_and_filter_seen(df)
+        print(f"{Fore.GREEN}✓ loaded {len(df)} raw posts{Style.RESET_ALL}")
+
+        # ---------------------- 5. clean text ----------------------
+        text_col = "text" if "text" in df.columns else "selftext"
+        df["cleaned_text"] = df[text_col].fillna("") + " " + df["title"].fillna("")
+        df["cleaned_text"] = df["cleaned_text"].apply(self._clean_text)
+
+        # ---------------------- 6. determine if the post is relevant ----------------------
+        df["is_relevant"] = df["cleaned_text"].apply(self._is_financial_post)
+
+        # ---------------------- 7. score the sentiment of the post ----------------------
+        df["sentiment"] = df["cleaned_text"].apply(self.sentiment_scorer.score)
+
+        # ---------------------- 8. calculate the engagement of the post ----------------------
+        df["engagement"] = df["score"].fillna(0) + df["num_comments"].fillna(0)
+
+        # ---------------------- 9. extract tickers and confidence ----------------------
+        (
+            tickers_list,
+            scores_list,
+            confidence_reasons_list,
+            ticker_in_title_flags_list,
+            num_ticker_counts,
+            portfolio_post_flags,
+            watchlist_post_flags,
+            position_language_flags,
+            review_queue,
+        ) = self._process_posts(df, text_col)
 
         # append the tickers and scores to the dataframe.
         df["tickers"] = tickers_list
@@ -907,7 +1029,11 @@ class RedditDataProcessor:
         self._log_summary(df)
         self._write_ticker_review_queue(review_queue)
         self._write_ticker_sources(df)
-        self._record_seen_ids(df)
+
+        # record all processed post ids (even those that ended up with 0 approved tickers)
+        # to avoid reprocessing / re-reviewing on future runs.
+        if processed_ids_all:
+            self._record_seen_ids(pd.DataFrame({"id": processed_ids_all}))
 
         print(f"{Fore.GREEN}✓ saved processed reddit data → {self._format_path(self.output_file)}{Style.RESET_ALL}")
         return df

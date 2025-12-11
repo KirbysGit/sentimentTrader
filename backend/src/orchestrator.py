@@ -109,10 +109,15 @@ class PipelineOrchestrator:
             return False
 
         # --- Determine which tickers to fetch ---
-        grouped = df.groupby("ticker").agg({
-            "confidence": "mean",
-            "engagement": "sum",
-        }).reset_index()
+        grouped = (
+            df.groupby("ticker")
+              .agg({"mean_confidence": "mean", "total_engagement": "sum"})
+              .reset_index()
+              .rename(columns={
+                  "mean_confidence": "confidence",
+                  "total_engagement": "engagement",
+              })
+        )
 
         # Filter rules
         filtered = grouped[grouped["confidence"] >= 0.5]
