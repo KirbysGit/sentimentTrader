@@ -7,10 +7,11 @@
 # high-signal subreddits for stock prediction (organized by priority)
 HIGH_SIGNAL_MUST_HAVE = [
     'wallstreetbets',  # extreme sentiment, high volume
-    'stocks',          # general stock discussion
-    'investing',       # investment-focused discussions
-    'StockMarket'      # market-wide discussions
 ]
+
+#'stocks',          # general stock discussion
+#'investing',       # investment-focused discussions
+#'StockMarket'      # market-wide discussions
 
 HIGH_SIGNAL_ADDITIONAL = [
     'news',            # general news (can affect markets)
@@ -27,7 +28,7 @@ SORT_METHODS = ['new', 'top', 'hot']  # collects from all 3 sort methods
 
 # test mode config (faster for testing - single subreddit, single sort)
 TEST_SUBREDDITS = ['wallstreetbets']
-TEST_SORT_METHODS = ['new']
+TEST_SORT_METHODS = ['hot']
 
 # collection math:
 # - production: 4 subreddits × 3 sorts × 100 posts = up to 1,200 posts
@@ -62,51 +63,26 @@ CONTEXT_REQUIRED_TICKERS = {
 
 # comprehensive blacklist covering slang, macro terms, finance acronyms, TA words
 WSB_FINANCE_BLACKLIST = {
-    "A", "AGAIN", "AHH", "AI", "ALL", "AND", "ANY", "ARE",
-    "ATH", "ATM", "BREAK", "BREAKOUT", "BULL", "BUT",
-    "CALL", "CALLS", "CAN", "CAGR", "CAT", "CHEAP", "CPI", "CPU",
-    "COULD", "CUDA", "DD", "DEAD", "DELTA", "DIAMOND", "DUMP", "DCF",
-    "DO", "DOWN", "EDA", "EBITDA", "EMA", "EPS", "ETFS",
-    "ETF", "ET", "EV", "EU", "FIB", "FED", "FCF", "FAILS", "FOMO",
-    "FOMU", "FUD", "GAIN", "GAINZ", "GAMMA", "GDP",
-    "GG", "GO", "GREEN", "GPU", "HODL", "HIGH",
-    "HOW", "HUGE", "IMF", "IN", "IRS", "ITM",
-    "IV", "IVR", "JOB", "LEFT", "LEAP", "LEAPS",
-    "LOSS", "LMAO", "LOL", "LOW", "MACD", "MAY",
-    "ML", "MOASS", "MUST", "NAV", "NEXT", "NIM", "NOT",
-    "NOW", "ON", "ONE", "OTM", "OUT", "OI", "P",
-    "PAT", "PBT", "PE", "PCE", "PIVOT", "PRESS", "PUMP",
-    "PUT", "PUTS", "QOQ", "QE", "QT", "RED",
-    "RESISTANCE", "RETURN", "RIGHT", "ROA",
-    "ROE", "ROI", "RSI", "SAFE", "SCALP",
-    "SEC", "SHOULD", "SHORT", "SMA", "STONKS",
-    "STRIKE", "SUPPORT", "S", "T", "TENDIES",
-    "THE", "THEY", "THEM", "THAT", "THIS",
-    "THETA", "THICC", "TLDR", "TPU", "TREND", "TWO",
-    "UP", "UK", "VWAP", "WAS", "WENDY", "WILL", "WHAT", "WHY",
-    "WTF", "YOLO", "YOY", "YCC",
-    # pipeline-observed false tickers
-    "BNPL", "CEO", "FDA", "WSB", "USD", "NTM",
-    "OTCPK", "OTCQB", "OTC",
-    # additional review false positives
-    "US", "USA", "UAE", "EUR", "GBP", "JPY",
-    "MIT", "WSJ", "CNBC", "NYT", "BBC", "NCIA",
-    "COVID", "HSA", "IRA", "LTCG",
-    "GPT", "API", "AWS", "FSD", "GEX", "ZIRP", "DCA", "EMH", "AGI", "ASI", "MAG",
-    "HCOL", "ADV", "LLC", "PM", "OF", "SINCE",
-    "HYSA",
-    "EBIT",
-    "AOV", "GMV", "LTV", "PLR", "CAPEX",
-    "ADHD", "CHAD", "GOD", "ZERO", "TILTS",
-    "STOCK", "HOT",
-    "THREE", "WEEKS", "MINUS", "CARE", "NATO", "ANTH",
-    "MAANG", "ROTH", "ESPN", "HBO", "FAQ", "FBI", "GFC", "ATP",
-    "ESOP", "BS", "III", "PS", "LARGE",
-    "VOTER", "MUCH", "MORE", "TOKYO", "TL", "TL;DR", "DR",
-    "RFK", "NASA", "NSSL", "OS",
-    "TIME", "LINE", "TURN", "GREAT", "TIS", "XXXXX",
-    # newly observed false positives
-    "DYOR",
+    "A", "ADHD", "ADV", "AGAIN", "AGI", "AHH", "AI", "ALL", "AND", "ANY", "AOV", "API",
+    "ARE", "ASI", "ATH", "ATM", "AWS", "BBC", "BNPL", "BREAK", "BREAKOUT", "BS", "BULL",
+    "BUT", "CALL", "CALLS", "CAN", "CAPEX", "CARE", "CAT", "CBO", "CEO", "CFO", "CHAD", "CHEAP",
+    "CNBC", "COO", "COULD", "COVID", "CPI", "CPU", "CUDA", "DCA", "DD", "DCF", "DEAD", "DELTA",
+    "DO", "DOWN", "DR", "DUMP", "DYOR", "EDA", "EBIT", "EBITDA", "EMH", "EPS", "ESOP", "ESPN",
+    "ET", "ETF", "ETFS", "EV", "EU", "FAQ", "FAILS", "FBI", "FCF", "FDA", "FIB", "FOMO",
+    "FOMU", "FSD", "FUD", "GAIN", "GAINZ", "GAMMA", "GBP", "GEX", "GFC", "GG", "GMV", "GOD",
+    "GO", "GREAT", "GREEN", "GPU", "GPT", "HBO", "HCOL", "HIGH", "HODL", "HOT", "HOW", "HSA",
+    "HUGE", "HYSA", "III", "IMF", "IN", "IRA", "IRS", "ITM", "IV", "IVR", "JOB", "JPY",
+    "LARGE", "LEAP", "LEAPS", "LEFT", "LINE", "LLC", "LMAO", "LOL", "LOSS", "LOW", "LTCG", "LTV",
+    "MACD", "MAG", "MAANG", "MAY", "MIT", "ML", "MOASS", "MORE", "MUCH", "MUST", "NAV", "NASA",
+    "NATO", "NEXT", "NIM", "NOT", "NOW", "NTM", "NSSL", "OF", "OI", "ON", "ONE", "OS",
+    "OTC", "OTCQB", "OTCPK", "OTM", "OUT", "P", "PAT", "PBT", "PCE", "PE", "PIVOT", "PLR",
+    "PM", "PRESS", "PS", "PUMP", "PUT", "PUTS", "QOQ", "QE", "QT", "RED", "RESISTANCE", "RETURN",
+    "RFK", "RIGHT", "ROA", "ROE", "ROI", "ROTH", "RSI", "S", "SAFE", "SCALP", "SEC", "SHOULD",
+    "SHORT", "SINCE", "SMA", "STONKS", "STOCK", "STRIKE", "SUPPORT", "T", "TENDIES", "THAT", "THE", "THEM",
+    "THEY", "THETA", "THICC", "THREE", "THIS", "TIME", "TILTS", "TL", "TL;DR", "TLDR", "TOKYO", "TREND",
+    "TURN", "TWO", "UAE", "UK", "UP", "US", "USA", "USD", "VOTER", "VWAP", "WAS", "WEEKS",
+    "WENDY", "WHAT", "WHY", "WILL", "WTF", "WSB", "WSJ", "YCC", "YOLO", "YOY", "ZERO", "ZIRP",
+    "XXXXX",
 }
 
 # unified blocklist used across stages
@@ -140,16 +116,12 @@ FINANCE_CONTEXT_WORDS = {
     'sold', 'selling', 'dumped', 'dumping', 'trim', 'trimmed', 'bagged', 'bagging',
     'positioned', 'positions', 'averaged', 'scaling', 'volatility', 'assets',
     'forecast', 's&p', 'sp500',
-    'microgrid', 'microgrids', 'grid', 'grid stability',
-    'distributed energy', 'energy storage', 'industrial power',
-    'batteries', 'battery', 'power applications',
     'buy', 'sell', 'price', 'trade', 'invest', 'market', 'position',
     'profit', 'loss', 'analysis', 'company', 'corporation', 'inc', 'ltd', 'tech',
     'up', 'down', 'gain', 'drop', 'rise', 'fall', 'quarter', 'growth', 'decline',
     'performance', 'trend', 'sector', 'industry', 'competition', 'partnership',
     'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy',
     'turbulence', 'turbulences',
-    'storage', 'renewables', 'missile', 'missiles'
 }
 
 # sentiment lexicon used by SentimentScorer (extend freely)
@@ -169,20 +141,21 @@ NEGATIVE_SENTIMENT_WORDS = {
 
 # common words that might be mistaken for tickers
 COMMON_WORDS = {
-    'THE', 'AND', 'FOR', 'ARE', 'OF', 'WAS', 'YOU', 'HAS', 'HAD', 'HIS', 'HER', 'ITS', 'OUR', 'THEIR',
-    'FROM', 'THIS', 'THAT', 'WITH', 'WHICH', 'WHEN', 'WHERE', 'WHAT', 'WHY', 'HOW', 'WHO',
-    'CAN', 'MAN', 'POST', 'LIVE', 'HAS', 'HAD', 'WAS', 'WERE', 'BEEN', 'BEING', 'HAVE', 'HAS',
-    'WILL', 'WOULD', 'SHALL', 'SHOULD', 'MAY', 'MIGHT', 'MUST', 'COULD', 'SHOULD', 'WOULD',
-    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'NOW', 'OUT', 'ALL', 'THEY', 'SAID', 'TIME', 'ABOUT',
-    'SOME', 'INTO', 'ALSO', 'THAN', 'THEN', 'WHEN', 'WHERE', 'WHY', 'HOW', 'WHAT', 'WHICH',
-    'THERE', 'HERE', 'THOSE', 'THESE', 'THEIR', 'THEM', 'THIS', 'THAT', 'THOSE', 'THESE',
-    'NOT', 'BUT', 'LIKE', 'MORE', 'JUST', 'SOME', 'TIME', 'GOOD', 'SAY', 'WAY', 'MOVE',
-    'BACK', 'LOOK', 'THINK', 'KNOW', 'MAKE', 'TAKE', 'COME', 'WELL', 'EVEN', 'WANT',
-    'NEED', 'MUCH', 'MANY', 'SUCH', 'MOST', 'PART', 'OVER', 'YEAR', 'HELP', 'WORK',
-    'LIFE', 'TELL', 'CASE', 'DAYS', 'FIND', 'NEXT', 'LAST', 'WEEK', 'GIVE', 'NAME',
-    'BEST', 'IDEA', 'TALK', 'SURE', 'KIND', 'HEAD', 'HAND', 'FACT', 'TYPE', 'LINE',
-    'WAIT', 'AFTER', 'LONG', 'FIRST', 'NEVER', 'WORTH', 'SEVEN', 'FEAST',
-    "TIME", "LINE", "TURN", "GREAT", "TIS",
+    "ABOUT", "AFTER", "ALL", "ALSO", "AND", "ARE", "BACK", "BEEN",
+    "BEING", "BEST", "BUT", "CAN", "CASE", "COME", "COULD", "DAYS",
+    "EVEN", "FACT", "FEAST", "FIND", "FIRST", "FOR", "FROM", "GIVE",
+    "GOOD", "GREAT", "HAD", "HAND", "HAS", "HAVE", "HEAD", "HELP",
+    "HERE", "HER", "HIS", "HOW", "IDEA", "INTO", "ITS", "JUST",
+    "KIND", "KNOW", "LAST", "LIFE", "LIKE", "LINE", "LIVE", "LONG",
+    "LOOK", "MAKE", "MAN", "MANY", "MAY", "MIGHT", "MORE", "MOST",
+    "MOVE", "MUCH", "MUST", "NAME", "NEED", "NEVER", "NEXT", "NOT",
+    "NOW", "OF", "OUR", "OUT", "OVER", "PART", "POST", "SAID",
+    "SAY", "SEVEN", "SHALL", "SHOULD", "SOME", "SUCH", "SURE", "TAKE",
+    "TALK", "TELL", "THAN", "THAT", "THE", "THEIR", "THEM", "THEN",
+    "THERE", "THESE", "THEY", "THINK", "THIS", "THOSE", "TIME", "TIS",
+    "TURN", "TYPE", "WANT", "WAS", "WAY", "WEEK", "WELL", "WERE",
+    "WHAT", "WHEN", "WHERE", "WHICH", "WHO", "WHY", "WILL", "WITH",
+    "WORK", "WOULD", "WORTH", "YEAR", "YOU",
 }
 
 # etf categories
@@ -217,34 +190,24 @@ ALWAYS_ALLOW = VALID_ETFS | {"BTC", "ETH", "SPX", "GOLD", "VXUS"}
 
 # well-known stock tickers
 WELL_KNOWN_TICKERS = {
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'JPM', 'BAC', 'WFC',
-    'INTC', 'AMD', 'CSCO', 'ORCL', 'IBM', 'PLTR', 'COIN', 'GME', 'AMC', 'BB',
-    'F', 'GM', 'GE', 'BA', 'RTX', 'LMT', 'NOC',
-    'PFE', 'JNJ', 'MRK', 'CVS', 'UNH',
-    'KO', 'PEP', 'MCD', 'WMT', 'TGT',
-    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ',
-    'RGTI', 'RGTZ', 'SEZL',
-    'MSTR', 'RDDT', 'GOOG', 'ANET', 'HOOD', 'DKNG', 'MSCI', 'ADP',
-    'VEQT', 'VHYG', 'PHYS', 'URA',
-    'SCHD', 'VIGAX', 'FSKAX', 'FSPGX', 'VNYTX', 'FDVV', 'VYMI',
-    'MAGA', 'GGLL', 'XOVR',
-    'UUUU', 'SMR', 'OKLO', 'RKLB', 'ASTS', 'ACHR',
-    'SOND', 'ANF', 'KSS', 'LSEG',
-    'ALAB', 'IREN',
-    'ESNT', 'PATH', 'CRWD',
-    'DLTR', 'AVGO', 'NEE', 'PLD', 'LLY', 'BUD', 'NQ', 'DASH', 'BE',
-    # newly promoted from review queue
-    'WBD', 'BABA', 'BILI', 'WB', 'PDD', 'TAL', 'EDU', 'EDIT',
+    "AAPL", "ACHR", "ADP", "AMC", "AMD", "AMZN", "ANET", "ANF",
+    "ASTS", "AVGO", "BABA", "BAC", "BA", "BB", "BE", "BILI",
+    "BUD", "CMCSA", "COIN", "CRWD", "CSCO", "CVS", "DASH",
+    "DIS", "DKNG", "DLTR", "EDU", "EDIT", "ESNT", "FDVV",
+    "F", "FSKAX", "FSPGX", "GE", "GGLL", "GM", "GME", "GOOG",
+    "GOOGL", "HOOD", "IBM", "INTC", "IREN", "JNJ", "JPM", "KO",
+    "KSS", "LLY", "LMT", "LSEG", "MAGA", "MCD", "META", "MSTR",
+    "MRK", "MSCI", "MSFT", "NEE", "NFLX", "NOC", "NQ", "NVDA",
+    "OKLO", "ORCL", "PATH", "PEP", "PDD", "PFE", "PHYS", "PLD",
+    "PLTR", "RDDT", "RGTI", "RGTZ", "RKLB", "RTX", "SCHD", "SEZL",
+    "SMR", "SOND", "T", "TAL", "TSLA", "UNH", "URA", "UUUU",
+    "VEQT", "VIGAX", "VHYG", "VNYTX", "VOO", "VYMI", "VZ",
+    "WB", "WBD", "WFC", "XOVR",
 }
 
 # negative context patterns that invalidate ticker matches
 NEGATIVE_CONTEXT_PATTERNS = {
-    'COIN': [
-        'meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin',
-        'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin',
-        'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin',
-        'crypto coin', 'cryptocurrency', 'token'
-    ],
+    'COIN': ['meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin', 'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin', 'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin', 'crypto coin', 'cryptocurrency', 'token'],
     'GOLD': ['gold standard', 'gold medal', 'gold mine', 'gold rush', 'gold price'],
     'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job'],
     'CASH': ['cash app', 'cash out', 'cash flow', 'cash back', 'cash money'],

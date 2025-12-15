@@ -14,7 +14,6 @@ organization:
       - _select_time_filter
       - _get_sort_stream
       - _extract_author_info
-      - _extract_post_media_info
       - _get_top_comments
 
     - fetch_subreddit_posts
@@ -65,7 +64,12 @@ from src.utils.config import (
     TEST_SORT_METHODS,
 )
 
-# load environment vars
+from src.utils.pipeline_config import (
+    REDDIT_DAYS_LOOKBACK,
+    REDDIT_POSTS_PER_SUBREDDIT,
+)
+
+# load environment vars.
 backend_dir = Path(__file__).parent.parent.parent
 env_path = backend_dir / ".env"
 load_dotenv(env_path if env_path.exists() else None)
@@ -79,18 +83,17 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 class RedditDataCollector:
 
-    def __init__(self, data_dir=None, max_days_lookback=30, run_date=None, run_id=None, enable_seen_registry: bool = True):
+    def __init__(self, run_date: str | None = None, run_id: str | None = None):
         self._run_ts = datetime.now(timezone.utc)                                                       # run timestamp.
         self.run_date = run_date or self._run_ts.date().isoformat()                                     # run date.
         self.run_id = run_id or self._run_ts.strftime("%Y%m%d_%H%M%S")                                  # run id.
-        self.data_dir = data_dir or self._build_day_dir(RAW_REDDIT_DIR, self.run_date)                  # data directory for raw data output.
-        self.max_days_lookback = max_days_lookback                                                      # max # of days to look back for data.
+        self.data_dir = self._build_day_dir(RAW_REDDIT_DIR, self.run_date)                              # data directory for raw data output.
+        self.max_days_lookback = REDDIT_DAYS_LOOKBACK                                                   # max # of days to look back for data.
         
         os.makedirs(self.data_dir, exist_ok=True)                                                       # create data directory if it doesn't exist.
 
-        self.enable_seen_registry = enable_seen_registry                                                # enable seen post registry.
         self.seen_registry_path = PROCESSED_REDDIT_BY_DAY_DIR.parent / "seen_post_ids.json"             # path to seen post ids registry.
-        self._seen_ids = self._load_seen_ids() if self.enable_seen_registry else set()                  # load seen ids.
+        self._seen_ids = self._load_seen_ids()                                                          # load seen ids.
 
         # initialize PRAW client.
         self.reddit = Reddit(
@@ -100,9 +103,9 @@ class RedditDataCollector:
             refresh_token=os.getenv("REFRESH_TOKEN"),
         )
 
-        # cutoff timestamp for filtering old posts
-        self.cutoff_date = datetime.now() - timedelta(days=max_days_lookback)
-        self.last_output_path = None
+        # cutoff timestamp for filtering old posts.
+        self.cutoff_date = datetime.now() - timedelta(days=REDDIT_DAYS_LOOKBACK)
+        self.collected_data_path = None
 
     @staticmethod
     def _build_day_dir(root: Path, run_date: str) -> Path:
@@ -137,8 +140,6 @@ class RedditDataCollector:
 
     def _load_seen_ids(self) -> set[str]:
         """grab previously processed post ids to avoid recollecting them."""
-        if not self.enable_seen_registry:
-            return set()
         if not self.seen_registry_path.exists():
             return set()
         try:
@@ -149,115 +150,42 @@ class RedditDataCollector:
             logger.warning(f"unable to load seen ids registry ({exc})")
             return set()
 
-    # -----------------------
-    # author metadata helper
-    # -----------------------
-    def _extract_author_info(self, post):
-        """extract author metadata safely (some posts have no author)."""
+    def _persist_seen_ids(self) -> None:
+        """persist seen post ids to disk."""
         try:
-            author = post.author
-            if not author:
-                return None, None, None, None
+            with open(self.seen_registry_path, "w", encoding="utf-8") as handle:
+                json.dump(sorted(self._seen_ids), handle, indent=2)
+        except Exception as exc:
+            logger.warning(f"unable to persist seen ids registry ({exc})")
 
-            return (
-                author.name,
-                getattr(author, "comment_karma", None) + getattr(author, "link_karma", None),
-                author.is_mod,
-                datetime.fromtimestamp(author.created_utc),
-            )
-        except:
-            return None, None, None, None
-
-    # -----------------------------
-    # url domain / media type helper
-    # -----------------------------
-    def _extract_post_media_info(self, post):
-        """
-        classify post type & domain.
-        uses common reddit post_hint values when available.
-        """
-        url = post.url or ""
-        domain = urlparse(url).netloc or None
-
+    def _check_for_image(self, post):
+        """ check if post has an image or video (including galleries/direct image links)."""
         post_hint = getattr(post, "post_hint", None)
+        if post_hint in {"image", "hosted:video", "rich:video"}:
+            return True
+        if getattr(post, "is_gallery", False):
+            return True
+        url_lower = (getattr(post, "url", "") or "").lower()
+        if url_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".gifv")):
+            return True
 
-        is_self = post.is_self
-        is_image = post_hint in ["image"]
-        is_link = (not is_self) and post_hint in ["link", "rich:link"]
-        is_video = post_hint in ["hosted:video", "rich:video"]
-
-        # crosspost data (optional).
-        is_cross = hasattr(post, "crosspost_parent_list")
-        cross_parent = None
-        cross_subreddit = None
-
-        # if its a crosspost, extract parent post id & subreddit.
-        if is_cross:
-            try:
-                cp = post.crosspost_parent_list[0]
-                cross_parent = cp.get("id")
-                cross_subreddit = cp.get("subreddit")
-            except:
-                pass
-
-        awards = getattr(post, "total_awards_received", 0)
-
-        return {
-            "domain": domain,
-            "post_hint": post_hint,
-            "is_self_post": is_self,
-            "is_image_post": is_image,
-            "is_link_post": is_link,
-            "is_video_post": is_video,
-            "is_crosspost": is_cross,
-            "crosspost_parent": cross_parent,
-            "crosspost_subreddit": cross_subreddit,
-            "awards_count": awards,
-        }
-
-    # -----------------------------
-    # enhanced comment extraction
-    # -----------------------------
-    def _get_top_comments(self, post, max_count=5):
-        """
-        extract top comments with score & author info.
-        return list of dicts.
-        """
-        try:
-            post.comments.replace_more(limit=0)
-        except:
-            return []
-
-        comments_out = []
-        for c in post.comments[:max_count]:
-            try:
-                comments_out.append({
-                    "body": c.body,
-                    "score": getattr(c, "score", None),
-                    "author": getattr(c.author, "name", None) if c.author else None,
-                    "author_flair": getattr(c, "author_flair_text", None),
-                })
-            except:
-                continue
-
-        return comments_out
-
+        return False
     # =======================================================================
     # fetch posts from one subreddit
     # =======================================================================
-    def fetch_subreddit_posts(self, subreddit_name, limit=100, sort="hot"):
+    def fetch_subreddit_posts(self, subreddit_name, sort="hot"):
         """
         fetch posts from a single subreddit using a specific sort method.
         return a DataFrame or None.
         """
         try:
             subreddit = self.reddit.subreddit(subreddit_name)
-            posts = self._get_sort_stream(subreddit, sort, limit)
+            posts = self._get_sort_stream(subreddit, sort, REDDIT_POSTS_PER_SUBREDDIT)
             out_rows = []
 
             for post in posts:
                 # skip posts we've already processed in previous runs.
-                if self.enable_seen_registry and post.id in self._seen_ids:
+                if post.id in self._seen_ids:
                     continue
 
                 # skip posts that are older than the cutoff date.
@@ -265,35 +193,25 @@ class RedditDataCollector:
                 if created < self.cutoff_date:
                     continue
 
-                # author metadata.
-                author_name, author_karma, author_is_mod, author_created = self._extract_author_info(post)
+                # skip posts that are images or videos (including galleries/direct image links).
+                if self._check_for_image(post):
+                    continue
 
-                # post media metadata.
-                media_info = self._extract_post_media_info(post)
+                # grab the flair (testing w/ WSB)
+                flair_text = (post.link_flair_text or "").strip().lower()
 
                 # build structured row.
                 out_rows.append({
+                    "created_utc": created,
                     "id": post.id,
+                    "subreddit": subreddit_name,
+                    "flair": flair_text,
+                    "score": post.score,
+                    "upvote_ratio": post.upvote_ratio,
+                    "num_comments": post.num_comments,
                     "title": post.title,
                     "text": post.selftext,
-                    "created_utc": created,
-                    "score": post.score,
-                    "num_comments": post.num_comments,
-                    "upvote_ratio": post.upvote_ratio,
-                    "subreddit": subreddit_name,
-                    "flair": post.link_flair_text,
-
-                    # author metadata.
-                    "author_name": author_name,
-                    "author_karma": author_karma,
-                    "author_is_mod": author_is_mod,
-                    "author_created_utc": author_created,
-
-                    # media metadata.
-                    **media_info,
-
-                    # enhanced comments.
-                    "top_comments": self._get_top_comments(post),
+                    "link": f"https://www.reddit.com{post.permalink}",
                 })
 
             return pd.DataFrame(out_rows) if out_rows else None
@@ -305,9 +223,9 @@ class RedditDataCollector:
     # =======================================================================
     # fetch all subreddits + save CSV
     # =======================================================================
-    def fetch_all_subreddits(self, limit=50, test_mode=False):
+    def fetch_all_subreddits(self, test_mode=False):
         print(f"{Fore.CYAN}===== stage 1: reddit data collection ====={Style.RESET_ALL}")
-        print(f"lookback={self.max_days_lookback} days | limit={limit}\n")
+        print(f"lookback={self.max_days_lookback} days | limit={REDDIT_POSTS_PER_SUBREDDIT}\n")
 
         subreddits = TEST_SUBREDDITS if test_mode else SUBREDDITS
         sorts = TEST_SORT_METHODS if test_mode else SORT_METHODS
@@ -323,7 +241,7 @@ class RedditDataCollector:
                 step += 1
                 print(f"  [{step}/{total}] {sort}...", end="", flush=True)
 
-                df = self.fetch_subreddit_posts(name, limit=limit, sort=sort)
+                df = self.fetch_subreddit_posts(name, sort=sort)
 
                 if df is not None and not df.empty:
                     all_dfs.append(df)
@@ -343,11 +261,19 @@ class RedditDataCollector:
             .sort_values("created_utc", ascending=False)
         )
 
-
+        """
+        # update seen-id registry with everything just collected.
+        if "id" in final.columns and not final.empty:
+            new_ids = {str(i) for i in final["id"].dropna().astype(str) if i}
+            if new_ids:
+                self._seen_ids.update(new_ids)
+                self._persist_seen_ids()
+        """
+        
         filename = f"reddit_posts_{self.run_id}.csv"
         output_path = self.data_dir / filename
         final.to_csv(output_path, index=False)
-        self.last_output_path = output_path
+        self.collected_data_path = output_path
 
         print(f"{Fore.GREEN}✓ collected {len(final)} total posts{Style.RESET_ALL}")
         print(f"  saved to: {output_path}\n")

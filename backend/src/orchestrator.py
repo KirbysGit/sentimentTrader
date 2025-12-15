@@ -20,6 +20,11 @@ sys.path.insert(0, str(backend_dir))
 # Pipeline stage imports
 from src.a_reddit.reddit_collector import RedditDataCollector
 from src.b_analysis.reddit_data_processor import RedditDataProcessor
+from src.utils.pipeline_config import (
+    REDDIT_DAYS_LOOKBACK,
+    REDDIT_POSTS_PER_SUBREDDIT,
+    TEST_MODE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +41,10 @@ class PipelineOrchestrator:
     # ------------------------------------------------------------
     # Stage 1 — Reddit Collection
     # ------------------------------------------------------------
-    def collect_reddit_data(self, days=30, limit=100):
+    def collect_reddit_data(self):
         try:
-            collector = RedditDataCollector(
-                max_days_lookback=days,
-                run_date=self.run_date,
-                run_id=self.run_id,
-            )
-            test_mode = limit <= 20
-
-            output_path = collector.fetch_all_subreddits(
-                limit=limit,
-                test_mode=test_mode,
-            )
+            collector = RedditDataCollector(run_date=self.run_date, run_id=self.run_id)
+            output_path = collector.fetch_all_subreddits(test_mode=TEST_MODE)
 
             success = output_path is not None
             if success:
@@ -59,18 +55,23 @@ class PipelineOrchestrator:
             logger.error(f"collection error: {e}")
             print(f"{Fore.RED}✗ collection error: {e}{Style.RESET_ALL}")
             return False
-
     # ------------------------------------------------------------
     # Stage 2 — Clean + Process Reddit Data
     # ------------------------------------------------------------
     def process_reddit_data(self):
         try:
+            # if collection failed, skip processing entirely.
+            if not self.raw_output_paths:
+                print(f"{Fore.RED}✗ no raw reddit output to process; skipping stage 2{Style.RESET_ALL}")
+                return False
+
             processor = RedditDataProcessor(
                 input_files=self.raw_output_paths,
                 run_date=self.run_date,
                 run_id=self.run_id,
             )
-            df = processor.process()                                # <— only method now
+            
+            df = processor.process()
 
             return df is not None and not df.empty
             
@@ -84,15 +85,13 @@ class PipelineOrchestrator:
                 if 'File "' in line and 'reddit_data_processor' in line:
                     print(f"{Fore.YELLOW}  {line.strip()}{Style.RESET_ALL}")
             return False
-
+    """
     # ------------------------------------------------------------
     # Stage 3 — Stock Data Collection
     # ------------------------------------------------------------
     def collect_stock_data(self, lookback_days=60):
-        """
-        Load processed Reddit output → determine which tickers → 
-        fetch historical stock data for those tickers.
-        """
+        #Load processed Reddit output → determine which tickers → 
+        #fetch historical stock data for those tickers.
         from datetime import datetime, timedelta
         from src.c_stocks.stock_data_collector import StockDataCollector
         from src.utils.path_config import PROCESSED_METRICS_DIR
@@ -147,18 +146,13 @@ class PipelineOrchestrator:
 
         print(Fore.GREEN + f"✓ stock data collection: {len(stock_data)} tickers" + Style.RESET_ALL)
         return True
-
+    """
 
 
 # ------------------------------------------------------------
 # CLI entrypoint
 # ------------------------------------------------------------
 def main():
-    from src.utils.pipeline_config import (
-        REDDIT_DAYS_LOOKBACK,
-        REDDIT_POSTS_PER_SUBREDDIT,
-    )
-
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
@@ -169,10 +163,7 @@ def main():
     # ---------------------------
     # Stage 1: Collect Reddit
     # ---------------------------
-    if orchestrator.collect_reddit_data(
-        days=REDDIT_DAYS_LOOKBACK,
-        limit=REDDIT_POSTS_PER_SUBREDDIT,
-    ):
+    if orchestrator.collect_reddit_data():
         print(f"{Fore.GREEN}✓ Stage 1 completed successfully{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}✗ Stage 1 failed{Style.RESET_ALL}")
@@ -185,7 +176,7 @@ def main():
         print(f"{Fore.GREEN}✓ Stage 2 completed successfully{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}✗ Stage 2 failed{Style.RESET_ALL}")
-
+    """
     # ---------------------------
     # Stage 3: Stock Data
     # ---------------------------
@@ -194,7 +185,7 @@ def main():
     else:
         print(f"{Fore.RED}✗ Stage 3 failed{Style.RESET_ALL}")
         return
-
+    """
 
 if __name__ == "__main__":
     main() 

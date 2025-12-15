@@ -76,19 +76,14 @@ class RedditDataProcessor:
 
     # minimal feature columns that move forward to Stage 3 / feature builder.
     PROCESSED_OUTPUT_COLUMNS = [
-        "id",
         "created_utc",
+        "id",
+        "run_id",
+        "run_date",
         "subreddit",
         "flair",
-        "author_name",
-        "author_karma",
-        "author_is_mod",
-        "author_created_utc",
         "score",
-        "num_comments",
-        "upvote_ratio",
         "engagement",
-        "is_relevant",
         "sentiment",
         "tickers",
         "ticker_scores",
@@ -98,8 +93,6 @@ class RedditDataProcessor:
         "is_portfolio_post",
         "is_watchlist_post",
         "has_position_language",
-        "run_date",
-        "run_id",
     ]
 
     PORTFOLIO_KEYWORDS = (
@@ -154,7 +147,13 @@ class RedditDataProcessor:
     )
 
     # initialize reddit data processor.
-    def __init__(self, input_files: Optional[Iterable[Path]] = None, run_date: Optional[str] = None, run_id: Optional[str] = None):
+    def __init__(
+        self,
+        input_files: Optional[Iterable[Path]] = None,
+        run_date: Optional[str] = None,
+        run_id: Optional[str] = None,
+        exclude_portfolio_posts: bool = True,
+    ):
         print(f"{Fore.CYAN}initializing reddit data processor...{Style.RESET_ALL}")
 
         self._run_ts = datetime.now(timezone.utc)                                                       # run timestamp.
@@ -163,8 +162,6 @@ class RedditDataProcessor:
         self.raw_count = 0                                                                              # raw count.
 
         self.input_files = [Path(p) for p in input_files] if input_files else []                        # input files.
-        self.raw_root = RAW_REDDIT_DIR
-        self.raw_day_dir = self._build_day_dir(self.raw_root, self.run_date)
 
         self.output_day_dir = self._build_day_dir(PROCESSED_REDDIT_BY_DAY_DIR, self.run_date)
         self.output_day_dir.mkdir(parents=True, exist_ok=True)
@@ -179,11 +176,7 @@ class RedditDataProcessor:
         self.confidence_scorer = ConfidenceScorer()
         self.finance_keywords = {kw.lower() for kw in FINANCE_CONTEXT_WORDS}
         self.canonical_alias_map = get_canonical_alias_map()
-
-        # optional seen-post registry hooks (disabled for now)
-        self.enable_seen_registry = True
-        self.seen_registry_path = PROCESSED_REDDIT_BY_DAY_DIR.parent / "seen_post_ids.json"
-        self._seen_ids = self._load_seen_ids() if self.enable_seen_registry else set()
+        self.exclude_portfolio_posts = False
 
         print(f"{Fore.GREEN}✓ reddit data processor ready{Style.RESET_ALL}")
 
@@ -195,40 +188,6 @@ class RedditDataProcessor:
         except ValueError:
             raise ValueError(f"run_date must be YYYY-MM-DD, got {run_date}")
         return root / year / month / day
-
-    def _load_seen_ids(self) -> set[str]:
-        """Optional helper to load seen post ids (disabled by default)."""
-        if not self.seen_registry_path.exists():
-            return set()
-        try:
-            with open(self.seen_registry_path, "r", encoding="utf-8") as handle:
-                return set(json.load(handle))
-        except Exception:
-            return set()
-
-    def _persist_seen_ids(self) -> None:
-        """Optional helper to persist seen ids (disabled by default)."""
-        if not self.enable_seen_registry:
-            return
-        try:
-            with open(self.seen_registry_path, "w", encoding="utf-8") as handle:
-                json.dump(sorted(self._seen_ids), handle, indent=2)
-        except Exception as exc:
-            print(f"{Fore.YELLOW}warning: unable to persist seen ids ({exc}){Style.RESET_ALL}")
-
-    def _record_seen_ids(self, df: pd.DataFrame) -> None:
-        """Update seen-id registry with posts processed this run."""
-        if not self.enable_seen_registry or "id" not in df.columns or df.empty:
-            return
-        ids_series = df["id"].dropna().astype(str)
-        new_ids = {i for i in ids_series if i and i.lower() != "nan"}
-        if not new_ids:
-            return
-        added = new_ids - self._seen_ids
-        if not added:
-            return
-        self._seen_ids.update(added)
-        self._persist_seen_ids()
 
     @staticmethod
     def _format_path(path: Path) -> str:
@@ -398,7 +357,6 @@ class RedditDataProcessor:
             sentiment_val = row.get("sentiment", 0.0)
             engagement = float(engagement_val) if pd.notna(engagement_val) else 0.0
             sentiment = float(sentiment_val) if pd.notna(sentiment_val) else 0.0
-            is_relevant = bool(row.get("is_relevant", False))
             title_flags = row.get("ticker_in_title", []) or []
             num_tickers = int(row.get("num_tickers_in_post") or len(tickers) or 0)
             if num_tickers <= 0:
@@ -430,7 +388,6 @@ class RedditDataProcessor:
                         "confidence": float(score),
                         "engagement": engagement,
                         "sentiment": sentiment,
-                        "is_relevant": is_relevant,
                         "weight": weight,
                         "in_title": in_title,
                         "has_position_language": has_position_language,
@@ -449,7 +406,6 @@ class RedditDataProcessor:
         daily = pd.DataFrame(rows)
         daily["ticker"] = daily["ticker"].apply(self._canonicalize_ticker)
         daily = daily[daily["ticker"] != ""]
-        daily["is_relevant_int"] = daily["is_relevant"].astype(int)
         daily["sentiment_x_eng"] = daily["sentiment"] * daily["engagement"]
         daily["has_position_language_int"] = daily["has_position_language"].astype(int)
         daily["in_title_int"] = daily["in_title"].astype(int)
@@ -464,7 +420,6 @@ class RedditDataProcessor:
             mean_sentiment=("sentiment", "mean"),
             sentiment_std=("sentiment", "std"),
             sentiment_x_eng_sum=("sentiment_x_eng", "sum"),
-            relevant_count=("is_relevant_int", "sum"),
             total_weight=("weight", "sum"),
             weighted_engagement=("weighted_engagement", "sum"),
             weighted_sentiment_sum=("weighted_sentiment", "sum"),
@@ -486,9 +441,7 @@ class RedditDataProcessor:
             daily_agg["weighted_sentiment_eng"] / daily_agg["weighted_engagement"].replace(0, np.nan)
         )
         daily_agg["weighted_engagement_sentiment"] = daily_agg["weighted_engagement_sentiment"].fillna(0.0)
-        daily_agg["relevant_ratio"] = daily_agg["relevant_count"] / daily_agg["num_mentions"].clip(
-            lower=1
-        )
+
         daily_agg["log_total_engagement"] = np.log1p(
             daily_agg["total_engagement"].clip(lower=0.0)
         )
@@ -539,7 +492,6 @@ class RedditDataProcessor:
         metrics = {
             "raw_posts": int(self.raw_count),
             "after_dedup": int(len(df)),
-            "relevant_financial": int(df["is_relevant"].sum()) if "is_relevant" in df else 0,
             "with_tickers": int(df[df["tickers"].apply(len) > 0].shape[0]) if not df.empty else 0,
             "avg_sentiment": avg_sentiment,
             "avg_confidence": avg_confidence,
@@ -589,23 +541,18 @@ class RedditDataProcessor:
         if not review_items:
             return
 
-        # de-duplicate review entries to avoid repeat noise across runs.
-        # use post_id + ticker + reason as a stable key.
-        seen_keys = set()
-        deduped: List[dict] = []
-        prior_seen_ids = self._seen_ids if self.enable_seen_registry else set()
-        for item in review_items:
-            post_id = item.get("post_id")
-            if post_id and post_id in prior_seen_ids:
-                continue  # already processed in a previous run
-            key = (post_id, item.get("ticker"), item.get("reason"))
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            deduped.append(item)
+        # keep only lightweight fields needed for review; drop noisy/full-text payloads.
+        allowed_fields = {
+            "post_id",
+            "ticker",
+            "reason",
+            "title",
+            "context_snippet",
+        }
 
-        if not deduped:
-            return
+        slimmed: List[dict] = []
+        for item in review_items:
+            slimmed.append({k: v for k, v in item.items() if k in allowed_fields})
 
         out = self.review_queue_path
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -717,7 +664,6 @@ class RedditDataProcessor:
             {Fore.MAGENTA}[Reddit Processor Summary]{Style.RESET_ALL}
             Raw posts:            {self.raw_count}
             After dedupe:         {len(df)}
-            Relevant financial:   {int(df["is_relevant"].sum()) if "is_relevant" in df else 0}
             With tickers:         {len(ticker_rows)}
             Avg sentiment:        {avg_sentiment:.3f}
             Avg confidence:       {avg_confidence:.3f}
@@ -726,50 +672,12 @@ class RedditDataProcessor:
 
     
     # step 1 - get the raw files.
-    def _get_raw_files(self) -> List[Path]:
-        raw_files = [path for path in self.input_files if Path(path).exists()]
-        if not raw_files:
-            raw_files = sorted(self.raw_day_dir.glob("reddit_posts_*.csv"))
-        if not raw_files:
-            print(f"{Fore.RED}✗ no raw reddit files found in {self.raw_day_dir}{Style.RESET_ALL}")
-        return raw_files
     
     # step 2 - read each raw reddit file.
     
     # step 3 - add all the files together to a single dataframe. 
-    
-    # step 4 - deduplicate and filter our seen posts.
-    def _dedupe_and_filter_seen(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], int]:
-        """
-        normalize ids, drop duplicates, and filter out already-seen posts.
-        returns: (filtered_df, processed_ids_all, skipped_count)
-        """
-        if "id" not in df.columns or df.empty:
-            return df, [], 0
 
-        # copy the dataframe and normalize the ids.
-        df = df.copy()
-        df["id"] = df["id"].astype(str)
-
-        # drop duplicates.
-        df = df.drop_duplicates(subset="id")
-
-        # filter out already-seen posts.
-        skipped = 0
-        if self.enable_seen_registry and self._seen_ids:
-            before_seen_filter = len(df)
-            df = df[~df["id"].isin(self._seen_ids)]
-            skipped = before_seen_filter - len(df)
-            if skipped > 0:
-                print(
-                    f"{Fore.YELLOW}⟳ skipped {skipped} previously processed posts (seen registry){Style.RESET_ALL}"
-                )
-
-        # get the processed ids.
-        processed_ids_all = df["id"].dropna().astype(str).tolist()
-        return df, processed_ids_all, skipped
-
-    # step 5 - clean the text using regex.
+    # step 4 - clean the text using regex.
     def _clean_text(self, text: str) -> str:
         """clean text by removing urls, newlines, and extra whitespace."""
         if not isinstance(text, str):
@@ -778,15 +686,6 @@ class RedditDataProcessor:
         text = re.sub(r"[\n\r\t]+", " ", text)
         text = re.sub(r"\s{2,}", " ", text).strip()
         return text
-
-    # step 6 - determine if post is financially relevant based on keywords.
-    def _is_financial_post(self, text: str) -> bool:
-        """determine if a post is financial relevant based on keywords."""
-        if not text:
-            return False
-
-        text_low = text.lower()
-        return any(keyword in text_low for keyword in self.finance_keywords)
 
     # step 7 - score the sentiment of the post referencing our sentiment_scorer.py.
 
@@ -799,6 +698,7 @@ class RedditDataProcessor:
         extract/validate tickers for a single post row and return structured outputs.
         returns: (tickers, scores, confidence_notes, title_flags, num_tickers, is_portfolio_post, is_watchlist_post, has_position_language, filtered_review)
         """
+        
         # --- 1. get the text and title.
         text = row.get("cleaned_text", "")
         title_text = row.get("title") or ""
@@ -874,6 +774,7 @@ class RedditDataProcessor:
     ]:
         """
         process all posts: extract/score/flag tickers and collect review items.
+        bascally the for loop for all of the posts actual extraction.
         returns all per-column lists plus the review_queue entries.
         """
 
@@ -949,43 +850,29 @@ class RedditDataProcessor:
     # ---- THE MEAT OF THE PROCESSING ----
     def process(self) -> pd.DataFrame:
 
-        # ---------------------- 1. get raw files ----------------------
-        raw_files = self._get_raw_files()
+        # ---------------------- 1. get raw file ----------------------
+        raw_files = [path for path in self.input_files if Path(path).exists()]
+
         if not raw_files:
+            print(f"{Fore.RED}✗ no raw reddit input files provided; stage 2 requires explicit inputs{Style.RESET_ALL}")
             return pd.DataFrame()
 
-        # ---------------------- 2. read each raw reddit file ----------------------
-        dfs = []
-        for f in raw_files:
-                df = pd.read_csv(f)
-                dfs.append(df)
+        if len(raw_files) > 1:
+            print(f"{Fore.YELLOW}⚠ multiple raw files provided; using first: {raw_files[0]}{Style.RESET_ALL}")
 
-        if not dfs:
-            return pd.DataFrame()
+        raw_file = raw_files[0]
 
-        # ---------------------- 3. concatenate all raw reddit files ----------------------
-        df = pd.concat(dfs, ignore_index=True)
+        # ---------------------- 2. read the raw reddit file ----------------------
+        df = pd.read_csv(raw_file)
         self.raw_count = len(df)
+        print(f"{Fore.GREEN}✓ loaded {len(df)} raw posts from {raw_file.name}{Style.RESET_ALL}")
 
-        # ---------------------- 4. deduplicate by id ----------------------
-        df, processed_ids_all, _ = self._dedupe_and_filter_seen(df)
-        print(f"{Fore.GREEN}✓ loaded {len(df)} raw posts{Style.RESET_ALL}")
-
-        # ---------------------- 5. clean text ----------------------
-        text_col = "text" if "text" in df.columns else "selftext"
-        df["cleaned_text"] = df[text_col].fillna("") + " " + df["title"].fillna("")
+        # ---------------------- 3. clean text ----------------------
+        text_col = "text"
+        df["cleaned_text"] = df["title"].fillna("") + " " + df[text_col].fillna("")
         df["cleaned_text"] = df["cleaned_text"].apply(self._clean_text)
 
-        # ---------------------- 6. determine if the post is relevant ----------------------
-        df["is_relevant"] = df["cleaned_text"].apply(self._is_financial_post)
-
-        # ---------------------- 7. score the sentiment of the post ----------------------
-        df["sentiment"] = df["cleaned_text"].apply(self.sentiment_scorer.score)
-
-        # ---------------------- 8. calculate the engagement of the post ----------------------
-        df["engagement"] = df["score"].fillna(0) + df["num_comments"].fillna(0)
-
-        # ---------------------- 9. extract tickers and confidence ----------------------
+        # ---------------------- 4. extract lots of info ----------------------
         (
             tickers_list,
             scores_list,
@@ -1008,8 +895,26 @@ class RedditDataProcessor:
         df["is_watchlist_post"] = watchlist_post_flags
         df["has_position_language"] = position_language_flags
 
+        # optionally drop portfolio posts entirely to reduce noise.
+        if self.exclude_portfolio_posts and "is_portfolio_post" in df.columns:
+            before_portfolio_filter = len(df)
+            df = df[~df["is_portfolio_post"].astype(bool)]
+            removed_portfolios = before_portfolio_filter - len(df)
+            if removed_portfolios > 0:
+                print(f"{Fore.YELLOW}⟳ skipped {removed_portfolios} portfolio-style posts{Style.RESET_ALL}")
+            # drop review items tied to filtered posts so diagnostics stay aligned.
+            if review_queue:
+                remaining_ids = set(df["id"].dropna().astype(str))
+                review_queue = [item for item in review_queue if str(item.get("post_id")) in remaining_ids]
+
         # only keep rows with at least 1 ticker.
         df = df[df["tickers"].apply(lambda x: len(x) > 0)]
+
+        # ---------------------- 3. calculate the engagement of the post ----------------------
+        df["engagement"] = df["score"].fillna(0) + df["num_comments"].fillna(0)
+
+        # ---------------------- 5. score the sentiment of the post ----------------------
+        df["sentiment"] = df["cleaned_text"].apply(self.sentiment_scorer.score)
 
         if df.empty:
             print(f"{Fore.YELLOW}no posts contained tickers. processed DF is empty.{Style.RESET_ALL}")
@@ -1029,11 +934,6 @@ class RedditDataProcessor:
         self._log_summary(df)
         self._write_ticker_review_queue(review_queue)
         self._write_ticker_sources(df)
-
-        # record all processed post ids (even those that ended up with 0 approved tickers)
-        # to avoid reprocessing / re-reviewing on future runs.
-        if processed_ids_all:
-            self._record_seen_ids(pd.DataFrame({"id": processed_ids_all}))
 
         print(f"{Fore.GREEN}✓ saved processed reddit data → {self._format_path(self.output_file)}{Style.RESET_ALL}")
         return df

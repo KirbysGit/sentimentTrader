@@ -80,22 +80,26 @@ class TickerExtractor:
         tickers = set()
 
         # ---------- 1. dollar-style tickers ($AAPL) ----------
+
+        # checks if dollar ticker regex fits point in our text, then if so verifies, it has a clean boundary
         for match in re.finditer(self.DOLLAR_TICKER_REGEX, text):
             if not self._has_clean_boundary(text, match.start(), match.end()):
                 continue
             tickers.add(match.group().replace("$", "").upper())
 
         # ---------- 2. raw uppercase tickers (NVDA, TSLA) ----------
+
+        # checks if matches our ticker regex.
         for match in re.finditer(self.RAW_TICKER_REGEX, text):
             if not self._has_clean_boundary(text, match.start(), match.end()):
                 continue
             tickers.add(match.group().upper())
 
+        # ---------- 3. validate via minimal entity linker ----------
         validated = []
         base_scores = []
         evidence_payload: List[Dict[str, Any]] = []
 
-        # ---------- 3. validate via minimal entity linker ----------
         filtered, review_items, extractor_meta = self._filter_noise_tickers(sorted(tickers), text)
 
         for ticker in filtered:
@@ -147,38 +151,47 @@ class TickerExtractor:
 
         fin_context_words = {w.lower() for w in FINANCE_CONTEXT_WORDS}
 
+        print(tickers)
+
         # iterate through each ticker.
         for ticker in tickers:
+
+            # if common word, skip.
             if self._is_common_word(ticker, text):
                 continue
 
-            classification = classify_token(ticker)
-            if classification == "blocked":
-                review.append(self._make_review_entry(ticker, "blacklist_filter", text))
-                continue
-            if classification == "unknown_candidate":
-                review.append(self._make_review_entry(ticker, "unknown_symbol", text))
-                continue
-            if classification == "ignored":
-                continue
-            ticker_lower = ticker.lower()
-            if self._matches_negative_context(ticker, text_low):
-                review.append(self._make_review_entry(ticker, "negative_context", text))
-                continue
             # check if the ticker is in the macro terms, WSB slang, WSB finance blacklist, or stock data blacklist.
-            if (
-                ticker in MACRO_TERMS
-                or ticker in WSB_SLANG
-            ):
+            if (ticker in MACRO_TERMS or ticker in WSB_SLANG):
                 review.append(self._make_review_entry(ticker, "blacklist_filter", text))
                 continue
+
             # check if the ticker is a single letter and not "F".
             if len(ticker) == 1 and ticker not in {"F"}:
                 review.append(self._make_review_entry(ticker, "single_letter"))
                 continue
+
             # check if the ticker is "ET" and there is a timestamp in the text.
             if ticker == "ET" and re.search(r"\b\d{1,2}:\d{2}\s*(?:am|pm)?\s*et\b", text_low):
                 review.append(self._make_review_entry(ticker, "timestamp_et", text))
+                continue
+
+            # classify the ticker.
+            classification = classify_token(ticker)
+
+            if classification == "blocked":
+                review.append(self._make_review_entry(ticker, "blacklist_filter", text))
+                continue
+
+            if classification == "unknown_candidate":
+                review.append(self._make_review_entry(ticker, "unknown_symbol", text))
+                continue
+
+            if classification == "ignored":
+                continue
+
+            ticker_lower = ticker.lower()
+            if self._matches_negative_context(ticker, text_low):
+                review.append(self._make_review_entry(ticker, "negative_context", text))
                 continue
 
             positions = [i for i, w in enumerate(words) if w == ticker_lower]
@@ -313,19 +326,24 @@ class TickerExtractor:
 
     @staticmethod
     def _has_clean_boundary(text: str, start: int, end: int) -> bool:
-        """Ensure the match is not embedded inside a larger word."""
+        # ensure the match is not embedded inside a larger word.
+        # checks if char before & after ticker is an alphanumeric value or underscore.
+
         def _is_valid_prev(char: str) -> bool:
             if not char:
                 return True
+
             return not char.isalnum() and char != "_"
 
         def _is_valid_next(char: str) -> bool:
             if not char:
                 return True
+
             return not char.isalnum() and char != "_"
 
         prev_char = text[start - 1] if start > 0 else ""
         next_char = text[end] if end < len(text) else ""
+
         return _is_valid_prev(prev_char) and _is_valid_next(next_char)
 
     @staticmethod
@@ -341,7 +359,11 @@ class TickerExtractor:
         """Check if the token is a common English word emphasized in uppercase."""
         if not ticker:
             return False
+
         lower = ticker.lower()
+
+        print(lower)
+        print(COMMON_WORDS_LOWER)
         if lower in COMMON_WORDS_LOWER:
             return True
         if not text:
