@@ -75,14 +75,6 @@ class EntityLinker:
         if ticker in self.etf_whitelist:
                 return True, 1.0, {"linker_reason": "etf_whitelist"}
 
-        # 2. blacklist = invalid
-        if ticker in self.common_words:
-            return False, 0.0, {"linker_reason": "common_word"}
-        if ticker in MACRO_TERMS or ticker in WSB_SLANG:
-            return False, 0.0, {"linker_reason": "macro_or_slang"}
-        if ticker in BLOCKLIST:
-            return False, 0.0, {"linker_reason": "stock_blacklist"}
-
         # 3. context blacklist overrides everything.
         blacklist_terms = self.context_blacklist.get(ticker, [])
         if blacklist_terms and any(term in text_low for term in blacklist_terms):

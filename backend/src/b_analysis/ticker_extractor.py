@@ -100,7 +100,9 @@ class TickerExtractor:
         base_scores = []
         evidence_payload: List[Dict[str, Any]] = []
 
-        filtered, review_items, extractor_meta = self._filter_noise_tickers(sorted(tickers), text)
+        filtered, review_items = self._filter_noise_tickers(sorted(tickers), text)
+
+        print(filtered)
 
         for ticker in filtered:
             is_valid, conf, linker_meta = self.entity_linker.validate(text, ticker)
@@ -109,7 +111,6 @@ class TickerExtractor:
                 base_scores.append(float(conf))  # ensure numeric
                 evidence_payload.append({
                     "ticker": ticker,
-                    "extractor": extractor_meta.get(ticker, {}),
                     "linker": linker_meta or {},
                 })
             else:
@@ -147,7 +148,7 @@ class TickerExtractor:
         review = []
         text_low = text.lower() if text else ""
         words = re.findall(r"[a-z0-9$]+", text_low)
-        evidence: Dict[str, Dict[str, Any]] = {}
+
 
         fin_context_words = {w.lower() for w in FINANCE_CONTEXT_WORDS}
 
@@ -156,135 +157,84 @@ class TickerExtractor:
         # iterate through each ticker.
         for ticker in tickers:
 
-            # if common word, skip.
-            if self._is_common_word(ticker, text):
-                continue
+            # ----- 1. initial classification to get rid of obvious noise.
+            classification = classify_token(ticker, text_low)
 
-            # check if the ticker is in the macro terms, WSB slang, WSB finance blacklist, or stock data blacklist.
-            if (ticker in MACRO_TERMS or ticker in WSB_SLANG):
-                review.append(self._make_review_entry(ticker, "blacklist_filter", text))
-                continue
-
-            # check if the ticker is a single letter and not "F".
-            if len(ticker) == 1 and ticker not in {"F"}:
-                review.append(self._make_review_entry(ticker, "single_letter"))
-                continue
-
-            # check if the ticker is "ET" and there is a timestamp in the text.
-            if ticker == "ET" and re.search(r"\b\d{1,2}:\d{2}\s*(?:am|pm)?\s*et\b", text_low):
-                review.append(self._make_review_entry(ticker, "timestamp_et", text))
-                continue
-
-            # classify the ticker.
-            classification = classify_token(ticker)
-
-            if classification == "blocked":
-                review.append(self._make_review_entry(ticker, "blacklist_filter", text))
-                continue
-
-            if classification == "unknown_candidate":
-                review.append(self._make_review_entry(ticker, "unknown_symbol", text))
-                continue
+            # --- negative classifications ---
 
             if classification == "ignored":
                 continue
 
-            ticker_lower = ticker.lower()
-            if self._matches_negative_context(ticker, text_low):
-                review.append(self._make_review_entry(ticker, "negative_context", text))
+            if classification == "blocked":
                 continue
 
-            positions = [i for i, w in enumerate(words) if w == ticker_lower]
-            if not positions:
-                review.append(self._make_review_entry(ticker, "not_in_text", text))
+            if classification == "single_letter":
                 continue
 
-            context_tokens = self._collect_context_tokens(words, positions)
-            context_snippet = self._extract_context_snippet(text, ticker, window=160)
-            entry_meta = {
-                "accept_reason": None,
-                "context_tokens": context_tokens,
-                "context_snippet": context_snippet,
-                "finance_terms": [],
-                "context_terms": [],
-                "peer_hit": False,
-                "peer_ticker": None,
-            }
+            if classification == "timestamp":
+                continue
 
-            # check if the ticker is in the well known tickers or valid ETFs.
-            if ticker in WELL_KNOWN_TICKERS or ticker in ALWAYS_ALLOW:
-                entry_meta["accept_reason"] = "well_known_ticker"
-                evidence[ticker] = entry_meta
+            # --- positive classifications ---
+
+            if classification == "known":
                 clean.append(ticker)
                 continue
 
-            # check if the ticker is in the ticker context.
-            context_terms = TICKER_CONTEXT.get(ticker, [])
-            matched_terms = [term for term in context_terms if term in text_low] if context_terms else []
-            if matched_terms:
-                entry_meta["context_terms"] = matched_terms
-                entry_meta["accept_reason"] = "context_keyword"
-                evidence[ticker] = entry_meta
-                clean.append(ticker)
+            # --- grab context snippet for evidence.
+            context_snippet = self._extract_context_snippet(text_low, ticker.lower(), window=160)
+
+            # --- needs to be reviewed ---
+
+            if classification == "unknown_candidate":
+                review.append(self._make_review_entry(ticker, "unknown_symbol", context_snippet))
                 continue
 
-            # check if the ticker is in the context required tickers and does not have alias context.
-            if ticker in CONTEXT_REQUIRED_TICKERS:
-                if not self.entity_linker.has_alias_context(text_low, ticker):
-                    review.append(self._make_review_entry(ticker, "missing_context_keyword", text))
+            if classification == "negative_context":
+                review.append(self._make_review_entry(ticker, "negative_context", context_snippet))
+                continue
+
+            # --- potential positive classifications w/ context ---
+
+            if classification == "context_required":
+                positions = [i for i, w in enumerate(words) if w == ticker_lower]
+                
+                review_result = self._context_required_review(ticker, text_low, positions, words)
+                if review_result == "missing_context":
+                    review.append(self._make_review_entry(ticker, "missing_context", context_snippet))
                     continue
-                entry_meta["context_terms"] = TICKER_CONTEXT.get(ticker, [])
-
-            # check if the ticker has strong financial context.
-            strong_context_found = False
-            finance_hits = set()
-            for pos in positions:
-                window = words[max(0, pos - 8): pos + 9]
-                window_hits = {w for w in window if w in fin_context_words}
-                if window_hits:
-                    strong_context_found = True
-                    finance_hits.update(window_hits)
-                    break
-
-            # if the ticker does not have strong financial context, add it to the review.
-            if not strong_context_found:
-                peer_hit, peer_symbol = self._has_peer_ticker_context(ticker, tickers, words, positions)
-                if peer_hit:
-                    entry_meta["peer_hit"] = True
-                    entry_meta["peer_ticker"] = peer_symbol
-                    entry_meta["accept_reason"] = "peer_ticker_context"
-                    evidence[ticker] = entry_meta
+                if review_result == "no_financial_context":
+                    review.append(self._make_review_entry(ticker, "no_financial_context", context_snippet))
+                    continue
+                if review_result == "strong_financial_context":
                     clean.append(ticker)
                     continue
-                review.append(self._make_review_entry(ticker, "no_financial_context", text))
-                continue
 
-            entry_meta["finance_terms"] = sorted(finance_hits)
-            entry_meta["accept_reason"] = entry_meta.get("accept_reason") or "finance_keywords"
-            evidence[ticker] = entry_meta
-            # add the ticker to the clean list.
-            clean.append(ticker)
+        return clean, review
 
-        return clean, review, evidence
+    def _context_required_review(self, ticker: str, text: str) -> dict:
 
-    def _has_peer_ticker_context(
-        self,
-        ticker: str,
-        all_tickers: List[str],
-        words: List[str],
-        positions: List[int],
-        radius: int = 10,
-    ) -> Tuple[bool, str]:
-        """Check if nearby well-known tickers provide implicit context."""
-        if not positions:
-            return False, ""
-        for peer in all_tickers:
-            if peer == ticker or peer not in WELL_KNOWN_TICKERS:
-                continue
-            peer_positions = [i for i, w in enumerate(words) if w == peer.lower()]
-            if any(abs(pos - peer_pos) <= radius for pos in positions for peer_pos in peer_positions):
-                return True, peer
-        return False, ""
+        # if ticker doesn't have alias context, returning missing_context.
+        if not self.entity_linker.has_alias_context(text_low, ticker):
+            return "missing_context"
+
+        # check if the ticker has strong financial context.
+        strong_context_found = False
+        finance_hits = set()
+
+        # iterate through each position in the text.
+        for pos in positions:
+            window = words[max(0, pos - 8): pos + 9]
+            window_hits = {w for w in window if w in fin_context_words}
+            if window_hits:
+                strong_context_found = True
+                finance_hits.update(window_hits)
+                break
+
+        # if the ticker does not have strong financial context, add it to the review.
+        if not strong_context_found:
+            return "no_financial_context"
+
+        return "strong_financial_context"
 
     # ------------------------------------------------------------------
     def _make_review_entry(self, ticker: str, reason: str, text: str = "", extra: dict = None) -> dict:
@@ -299,30 +249,22 @@ class TickerExtractor:
         return entry
 
     def _extract_context_snippet(self, text: str, ticker: str, window: int = 80) -> str:
-        """extract a context snippet from the text."""
+        """extract a context snippet from the text w/ radius of 80 chars around ticker"""
+
         if not text:
             return ""
-        text_lower = text.lower()
-        ticker_lower = ticker.lower()
-        idx = text_lower.find(ticker_lower)
+
+        idx = text.find(ticker)
+
         if idx == -1:
             idx = 0
+
         start = max(0, idx - window // 2)
         end = min(len(text), idx + window // 2)
-        snippet = text[start:end].strip()
-        return snippet
 
-    @staticmethod
-    def _collect_context_tokens(words: List[str], positions: List[int], radius: int = 8, max_tokens: int = 40) -> List[str]:
-        """Collect a small window of tokens for evidence."""
-        tokens: List[str] = []
-        for pos in positions:
-            start = max(0, pos - radius)
-            end = min(len(words), pos + radius + 1)
-            tokens.extend(words[start:end])
-            if len(tokens) >= max_tokens:
-                break
-        return tokens[:max_tokens]
+        snippet = text[start:end].strip()
+
+        return snippet
 
     @staticmethod
     def _has_clean_boundary(text: str, start: int, end: int) -> bool:
@@ -345,33 +287,3 @@ class TickerExtractor:
         next_char = text[end] if end < len(text) else ""
 
         return _is_valid_prev(prev_char) and _is_valid_next(next_char)
-
-    @staticmethod
-    def _matches_negative_context(ticker: str, text_low: str) -> bool:
-        """Check if the token appears inside known non-financial phrases."""
-        patterns = NEGATIVE_CONTEXT_PATTERNS.get(ticker, [])
-        if not patterns or not text_low:
-            return False
-        return any(pattern in text_low for pattern in patterns)
-
-    @staticmethod
-    def _is_common_word(ticker: str, text: str) -> bool:
-        """Check if the token is a common English word emphasized in uppercase."""
-        if not ticker:
-            return False
-
-        lower = ticker.lower()
-
-        print(lower)
-        print(COMMON_WORDS_LOWER)
-        if lower in COMMON_WORDS_LOWER:
-            return True
-        if not text:
-            return False
-        text_low = text.lower()
-        pattern = re.compile(rf"\b{re.escape(lower)}\b")
-        for match in pattern.finditer(text_low):
-            original = text[match.start():match.end()]
-            if not original.isupper():
-                return True
-        return False

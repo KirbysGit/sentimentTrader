@@ -182,6 +182,10 @@ ETF_CATEGORIES = {
     }
 }
 
+TIMESTAMP_TICKERS = {
+    "ET", "EST", "EDT", "CT", "CST", "CDT", "PT", "PST", "PDT", "MT", "MST", "MDT", "UTC", "GMT"
+}
+
 # flatten etf list for quick lookup
 VALID_ETFS = {etf for category in ETF_CATEGORIES.values() for etf in category}
 
@@ -209,7 +213,7 @@ WELL_KNOWN_TICKERS = {
 NEGATIVE_CONTEXT_PATTERNS = {
     'COIN': ['meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin', 'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin', 'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin', 'crypto coin', 'cryptocurrency', 'token'],
     'GOLD': ['gold standard', 'gold medal', 'gold mine', 'gold rush', 'gold price'],
-    'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job'],
+    'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job', 'good news', 'good boy'],
     'CASH': ['cash app', 'cash out', 'cash flow', 'cash back', 'cash money'],
     'MOON': ['to the moon', 'moon shot', 'moon boy', 'moon mission'],
     'PUMP': ['pump and dump', 'pump scheme', 'pump group'],

@@ -853,13 +853,6 @@ class RedditDataProcessor:
         # ---------------------- 1. get raw file ----------------------
         raw_files = [path for path in self.input_files if Path(path).exists()]
 
-        if not raw_files:
-            print(f"{Fore.RED}✗ no raw reddit input files provided; stage 2 requires explicit inputs{Style.RESET_ALL}")
-            return pd.DataFrame()
-
-        if len(raw_files) > 1:
-            print(f"{Fore.YELLOW}⚠ multiple raw files provided; using first: {raw_files[0]}{Style.RESET_ALL}")
-
         raw_file = raw_files[0]
 
         # ---------------------- 2. read the raw reddit file ----------------------

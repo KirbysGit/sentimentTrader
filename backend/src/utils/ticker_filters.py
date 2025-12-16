@@ -8,6 +8,12 @@ from src.utils.config import (
     BLOCKLIST,
     ALWAYS_ALLOW,
     COMMON_WORDS,
+    WELL_KNOWN_TICKERS,
+    NEGATIVE_CONTEXT_PATTERNS,
+    TIMESTAMP_TICKERS,
+    MACRO_TERMS,
+    WSB_SLANG,
+    CONTEXT_REQUIRED_TICKERS,
 )
 from src.utils.ticker_universe import TICKER_UNIVERSE
 
@@ -36,7 +42,7 @@ def is_symbol_candidate(token: str, universe: Set[str] | None = None) -> bool:
     return up in universe
 
 
-def classify_token(token: str, universe: Set[str] | None = None) -> str:
+def classify_token(token: str, text_low: str | None = None, universe: Set[str] | None = None) -> str:
     """
     Classify a token as:
         - "blocked": explicitly blacklisted
@@ -46,31 +52,31 @@ def classify_token(token: str, universe: Set[str] | None = None) -> str:
     """
     # normalize token to uppercase.
     up = _normalize(token)
+    text_low = text_low or ""
     
     # if token is empty, return ignored.
     if not up:
         return "ignored"
 
-    # if token is a common word, return blocked.
-    if up in COMMON_WORDS:
-        return "blocked"
+    if len(up) == 1 and not up in {"F"}:
+        return "single_letter"
+
+    if up in TIMESTAMP_TICKERS:
+        return "timestamp"
 
     # if token is in the blocklist, return blocked.
-    if up in BLOCKLIST:
+    if up in BLOCKLIST or up in MACRO_TERMS or up in COMMON_WORDS or up in WSB_SLANG:
         return "blocked"
 
-    # if token is in the always allow set, return known.
-    if up in ALWAYS_ALLOW:
-        return "known"
+    if _matches_negative_context(up, text_low):
+        return "negative_context"
 
-    # if token is in the ticker universe, return known.
+    if up in CONTEXT_REQUIRED_TICKERS:
+        return "context_required"
+
     universe = universe or TICKER_UNIVERSE
-    if up in universe:
+    if up in universe or up in WELL_KNOWN_TICKERS or up in ALWAYS_ALLOW:
         return "known"
-
-    # if token is a repeated fill, return ignored.
-    if _is_repeated_fill(up, universe):
-        return "ignored"
 
     # if token is a valid ticker, return unknown candidate.
     if up.isalpha() and 1 <= len(up) <= 5:
@@ -85,13 +91,9 @@ def _normalize(token: str | None) -> str:
     return (token or "").strip().upper()
 
 
-def _is_repeated_fill(symbol: str, universe: Set[str]) -> bool:
-    """
-    return True if symbol is a repeated-letter filler like XXXXX.
-    """
-    if len(symbol) >= 4 and len(set(symbol)) == 1:
-        if symbol not in universe and symbol not in ALWAYS_ALLOW:
-            return True
-    return False
-
-
+def _matches_negative_context(ticker: str, text_low: str) -> bool:
+    """Check if the token appears inside known non-financial phrases."""
+    patterns = NEGATIVE_CONTEXT_PATTERNS.get(ticker, [])
+    if not patterns or not text_low:
+        return False
+    return any(pattern in text_low for pattern in patterns)

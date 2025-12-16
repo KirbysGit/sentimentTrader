@@ -11,7 +11,7 @@ TEST_MODE = True
 # test mode settings (fast, minimal data for development)
 # ============================================================================
 TEST_DAYS_LOOKBACK = 7  # look back 7 days
-TEST_POSTS_PER_SUBREDDIT = 10  # 10 posts per subreddit/sort (triggers test_mode in collector)
+TEST_POSTS_PER_SUBREDDIT = 50  # 10 posts per subreddit/sort (triggers test_mode in collector)
 
 # ============================================================================
 # production mode settings (full data collection for sentiment analysis)

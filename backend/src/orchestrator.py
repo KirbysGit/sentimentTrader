@@ -20,6 +20,7 @@ sys.path.insert(0, str(backend_dir))
 # Pipeline stage imports
 from src.a_reddit.reddit_collector import RedditDataCollector
 from src.b_analysis.reddit_data_processor import RedditDataProcessor
+from src.b_analysis.reddit_processor import RedditProcessor
 from src.utils.pipeline_config import (
     REDDIT_DAYS_LOOKBACK,
     REDDIT_POSTS_PER_SUBREDDIT,
@@ -36,7 +37,7 @@ class PipelineOrchestrator:
         self.run_ts = datetime.now(timezone.utc)
         self.run_date = self.run_ts.date().isoformat()
         self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")
-        self.raw_output_paths = []
+        self.raw_output_path = None
             
     # ------------------------------------------------------------
     # Stage 1 — Reddit Collection
@@ -48,7 +49,7 @@ class PipelineOrchestrator:
 
             success = output_path is not None
             if success:
-                self.raw_output_paths = [output_path]
+                self.raw_output_path = output_path
             return success
             
         except Exception as e:
@@ -61,14 +62,12 @@ class PipelineOrchestrator:
     def process_reddit_data(self):
         try:
             # if collection failed, skip processing entirely.
-            if not self.raw_output_paths:
+            if not self.raw_output_path:
                 print(f"{Fore.RED}✗ no raw reddit output to process; skipping stage 2{Style.RESET_ALL}")
                 return False
 
-            processor = RedditDataProcessor(
-                input_files=self.raw_output_paths,
-                run_date=self.run_date,
-                run_id=self.run_id,
+            processor = RedditProcessor(
+                input_file=self.raw_output_path
             )
             
             df = processor.process()

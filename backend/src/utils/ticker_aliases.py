@@ -3,28 +3,15 @@
 from typing import Dict, List
 
 TICKER_ALIASES: Dict[str, List[str]] = {
-    # Commodities / international listings
+    "AAPL": ["APPL"],
+    "BRK.A": ["BRKA"],
+    "BRK.B": ["BRK", "BRKB"],
     "GOLD": ["GOLD.TO", "GOLD=F"],
-    "USD": ["DX-Y.NYB", "DXY"],
-    "BTC": ["BTC-USD", "XBT-USD"],
-    "ETH": ["ETH-USD"],
-    # Crypto ETFs
-    "IBIT": ["IBIT.O"],
-    "BITB": ["BITB.O"],
-    # ETFs and international listings observed in pipeline runs
-    "VEQT": ["VEQT.TO"],
-    "VHYG": ["VHYG.L"],
+    "LLY": ["LILLY"],
     "LSEG": ["LSEG.L"],
     "LVMH": ["MC.PA", "LVMHF"],
-    "FTSE": ["^FTSE"],
-    # typo/alias guards (map back to the canonical equity)
-    "AAPL": ["APPL"],
-    "NVDA": ["NVIDA", "NVDIA", "NIDA"],
-    "LLY": ["LILLY"],
-    "BRK.B": ["BRK", "BRKB"],
-    "BRK.A": ["BRKA"],
+    "NVDA": ["NVIDA", "NVDIA", "NIDA", "NVIDIA"],
     "TSM": ["TSMC"],
-    "SPY": ["SPX"],
 }
 
 
