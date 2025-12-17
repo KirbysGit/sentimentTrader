@@ -1,6 +1,3 @@
-"""
-Simple Pipeline Orchestrator
-"""
 
 import os
 import sys
@@ -9,81 +6,67 @@ from pathlib import Path
 from datetime import datetime, timezone
 from colorama import Fore, Style
 
-# Suppress TF warnings (if TF ever gets used)
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-# Ensure backend is importable
+# ensure backend is importable.
 current_dir = Path(__file__).parent
 backend_dir = current_dir.parent
 sys.path.insert(0, str(backend_dir))
 
-# Pipeline stage imports
-from src.a_reddit.reddit_collector import RedditDataCollector
-from src.b_analysis.reddit_data_processor import RedditDataProcessor
+# pipeline stage imports.
+from src.a_reddit.rd_collector import RedditCollector
 from src.b_analysis.reddit_processor import RedditProcessor
-from src.utils.pipeline_config import (
-    REDDIT_DAYS_LOOKBACK,
-    REDDIT_POSTS_PER_SUBREDDIT,
-    TEST_MODE,
-)
 
 logger = logging.getLogger(__name__)
 
 
 class PipelineOrchestrator:
+
+    # --- self-initialize.
+
     def __init__(self):
-        print(f"{Fore.CYAN}=== Pipeline Orchestrator ==={Style.RESET_ALL}")
-        print(f"{Fore.GREEN}✓ Ready\n{Style.RESET_ALL}")
-        self.run_ts = datetime.now(timezone.utc)
-        self.run_date = self.run_ts.date().isoformat()
-        self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")
-        self.raw_output_path = None
+        print(f"{Fore.CYAN}=== pipeline 🤓 is ready!===\n{Style.RESET_ALL}")
+
+        # -- 1. run start data.
+        self.run_ts = datetime.now(timezone.utc)                            # run time.
+        self.run_date = self.run_ts.date().isoformat()                      # run date.
+        self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")                 # run id.
+
+        # -- 2. after phase 1 : our reddit dir
+        self.raw_output_path = None                                             
             
-    # ------------------------------------------------------------
-    # Stage 1 — Reddit Collection
-    # ------------------------------------------------------------
+    # stage 1 - reddit collection.
+
     def collect_reddit_data(self):
         try:
-            collector = RedditDataCollector(run_date=self.run_date, run_id=self.run_id)
-            output_path = collector.fetch_all_subreddits(test_mode=TEST_MODE)
-
+            collector = RedditCollector(run_date=self.run_date, run_id=self.run_id)
+            
+            output_path = collector.fetch_data()
             success = output_path is not None
+
             if success:
                 self.raw_output_path = output_path
-            return success
+                return success
+            else:
+                return False
             
         except Exception as e:
-            logger.error(f"collection error: {e}")
-            print(f"{Fore.RED}✗ collection error: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 1 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
-    # ------------------------------------------------------------
-    # Stage 2 — Clean + Process Reddit Data
-    # ------------------------------------------------------------
+
+    # stage 2 - process reddit data.
+
     def process_reddit_data(self):
         try:
-            # if collection failed, skip processing entirely.
-            if not self.raw_output_path:
-                print(f"{Fore.RED}✗ no raw reddit output to process; skipping stage 2{Style.RESET_ALL}")
-                return False
-
-            processor = RedditProcessor(
-                input_file=self.raw_output_path
-            )
+            processor = RedditProcessor(input_file=self.raw_output_path)
             
             df = processor.process()
 
             return df is not None and not df.empty
             
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            logger.error(f"processing error: {e}\n{tb}")
-            print(f"{Fore.RED}✗ processing error: {e}{Style.RESET_ALL}")
-            # show file and line where error occurred
-            for line in tb.split('\n'):
-                if 'File "' in line and 'reddit_data_processor' in line:
-                    print(f"{Fore.YELLOW}  {line.strip()}{Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 1 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
+
     """
     # ------------------------------------------------------------
     # Stage 3 — Stock Data Collection
@@ -151,30 +134,23 @@ class PipelineOrchestrator:
 # ------------------------------------------------------------
 # CLI entrypoint
 # ------------------------------------------------------------
-def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-    
+def main():    
     orchestrator = PipelineOrchestrator()
 
-    # ---------------------------
-    # Stage 1: Collect Reddit
-    # ---------------------------
+    # phase 1 : collect reddit.
+
     if orchestrator.collect_reddit_data():
-        print(f"{Fore.GREEN}✓ Stage 1 completed successfully{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== ✓ stage 1 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}✗ Stage 1 failed{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== ✗ stage 1 failed! ===\n{Style.RESET_ALL}")
         return
 
-    # ---------------------------
-    # Stage 2: Process Reddit
-    # ---------------------------
+    # phase 2 : process reddit.
     if orchestrator.process_reddit_data():
-        print(f"{Fore.GREEN}✓ Stage 2 completed successfully{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== ✓ stage 2 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}✗ Stage 2 failed{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")
+
     """
     # ---------------------------
     # Stage 3: Stock Data

@@ -1,40 +1,16 @@
-# main pipeline configuration file
+# main pipeline configuration file.
 
 # ============================================================================
 # stage 1: reddit collection config
 # ============================================================================
 
-# high-signal subreddits for stock prediction (organized by priority)
-HIGH_SIGNAL_MUST_HAVE = [
-    'wallstreetbets',  # extreme sentiment, high volume
-]
+# later :
+# news, worldnews, finance, technology, cryptocurrency, pennystocks
 
-#'stocks',          # general stock discussion
-#'investing',       # investment-focused discussions
-#'StockMarket'      # market-wide discussions
-
-HIGH_SIGNAL_ADDITIONAL = [
-    'news',            # general news (can affect markets)
-    'worldnews',       # global news (market impacts)
-    'finance',         # broader finance discussions
-    'technology',      # tech sector sentiment
-    'cryptocurrency',  # overlapping sentiment trends
-    'pennystocks'      # extreme sentiment spikes
-]
-
-# active production subreddits (currently using must-have only)
-SUBREDDITS = HIGH_SIGNAL_MUST_HAVE.copy()
-SORT_METHODS = ['new', 'top', 'hot']  # collects from all 3 sort methods
-
-# test mode config (faster for testing - single subreddit, single sort)
-TEST_SUBREDDITS = ['wallstreetbets']
-TEST_SORT_METHODS = ['hot']
-
-# collection math:
-# - production: 4 subreddits × 3 sorts × 100 posts = up to 1,200 posts
-# - test: 1 subreddit × 1 sort × 10 posts = 10 posts
-# - with additional subs: 10 subreddits × 3 sorts × 100 posts = up to 3,000 posts
-
+SUBREDDITS = ['wallstreetbets']
+SORT_METHODS = ['new', 'top', 'hot']
+LOOKBACK = 7
+NUM_POSTS = 20
 
 # ============================================================================
 # stage 2: ticker analysis config

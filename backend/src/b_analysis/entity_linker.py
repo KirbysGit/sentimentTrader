@@ -38,7 +38,7 @@ from src.utils.config import (
     ALWAYS_ALLOW,
 )
 from src.utils.ticker_aliases import TICKER_ALIASES
-from src.utils.ticker_context_config import TICKER_CONTEXT, CONTEXT_BLACKLIST
+from src.utils.ticker_context import TICKER_CONTEXT, CONTEXT_BLACKLIST
 
 # setup logging.
 logger = logging.getLogger(__name__)
