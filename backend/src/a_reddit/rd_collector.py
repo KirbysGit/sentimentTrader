@@ -64,6 +64,17 @@ class RedditCollector:
 
         return root / year / month / day
 
+    @staticmethod
+    def is_unrenderable_text(text: str) -> bool:
+        if not text:
+            return False
+        lower = text.lower()
+        markers = (
+            "not supported on old reddit",
+            "click here to view the full post",
+        )
+        return any(marker in lower for marker in markers)
+
     def get_time_filter(self) -> str:
         # based on lookback value, adjust sort.
         if self.lookback < 1:
@@ -130,8 +141,12 @@ class RedditCollector:
                 if post.id in self.seen:                                # if we've already seen post.
                     continue                                            # skip it.
 
-                if self.check_for_image(post):                              # if post has image.
+                if self.check_for_image(post):                          # if post has image.
                     continue                                            # skip it.
+
+                body = post.selftext if post.selftext else ""
+                if self.is_unrenderable_text(body):                     # if unsupported text format.
+                    continue
                 
                 flair = (post.link_flair_text or "").strip().lower()    # grab post flair.
 

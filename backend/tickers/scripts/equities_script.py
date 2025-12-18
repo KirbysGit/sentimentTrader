@@ -9,6 +9,7 @@ def build_equity_universe(
     keep_columns=("symbol", "name", "exchange"),
 ):
     eq = fd.Equities()
+
     df = eq.select(
         exchange=exchanges,
         country=country,
@@ -27,19 +28,36 @@ def build_equity_universe(
     # ensure output directory exists
     out_path_obj = Path(out_path)
     out_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Reduced from ~160K eqs to {len(df)} after our sort.")
     # save metadata (including symbol) as CSV
     df.to_csv(out_path_obj, index=False)
 
 if __name__ == "__main__":
-    # Add US plus major international exchanges
     major_exchanges = [
-        "NMS", "NGM", "NCM", "NAS", "NYS", "ASE",      # US (NASDAQ/NYSE/AMEX variants)
-        "GER", "FRA", "BER", "MUN",                    # Germany (for Siemens, etc.)
-        "LSE",                                         # UK
-        "HKG",                                         # Hong Kong
-        "JPX",                                         # Japan
-        "ASX",                                         # Australia
-        "CNQ",                                  # Canada
+        # US
+        "NMS", "NGM", "NCM", "NAS", "NYQ", "NYS", "ASE", "PCX",  # skip "PNK" unless you want OTC noise
+
+        # Germany (Siemens, etc.)
+        "FRA", "GER", "MUN", "DUS", "STU", "BER", "HAM", "HAN",
+
+        # Taiwan (TSMC)
+        "TAI",
+
+        # Japan
+        "JPX",
+
+        # Hong Kong
+        "HKG",
+
+        # UK
+        "LSE", "IOB",
+
+        # Canada
+        "TOR", "VAN", "CNQ", "CSE",
+
+        # France / Benelux
+        "PAR", "ENX", "AMS"
     ]
 
     build_equity_universe(

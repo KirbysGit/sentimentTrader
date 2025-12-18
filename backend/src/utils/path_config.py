@@ -17,6 +17,7 @@ env_path = proj_root / ".env"
 # Data subdirectories
 raw_dir = data_dir / "raw"
 processed_dir = data_dir / "processed"
+reasoning_dir = data_dir / "reasoning"
 
 # data subdirectory.
 seen_path = data_dir / "seen_post_ids.json"

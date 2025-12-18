@@ -7,14 +7,65 @@
 # later :
 # news, worldnews, finance, technology, cryptocurrency, pennystocks
 
-SUBREDDITS = ['wallstreetbets']
+SUBREDDITS = ['wallstreetbets', 'news', 'investing']
 SORT_METHODS = ['new', 'top', 'hot']
-LOOKBACK = 7
-NUM_POSTS = 20
+LOOKBACK = 30
+NUM_POSTS = 10
 
 # ============================================================================
 # stage 2: ticker analysis config
 # ============================================================================
+
+suffixes = (" inc", " corp", " corporation", " ltd", " plc", " sa", " nv", " ag", " co", " company", " limited")
+
+ticker_stop_terms = {
+    "cfo", "ceo", "coo", "eps", "fcf", "ai", "ipo", "pt", "news", "adr", "etf", "etfs", "spac",
+    "roi", "ip", "lego", "usd", "nswa", "wsbf", "for", "by", "as", "yolo", "dd", "eu", "ap", "mit", 
+    "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic"
+}
+
+popular_tickers = {
+    "AAPL", "MSFT", "GOOG", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+    "AMD", "INTC", "QCOM", "MU", "TSM", "AVGO", "ASML", "ARM",
+    "CRM", "ORCL", "NOW", "ADBE", "SNOW", "DDOG", "MDB", "ZS",
+    "V", "MA", "PYPL", "SQ", "AFRM", "SOFI", "COIN",
+    "NFLX", "DIS", "HD", "COST", "WMT", "TGT", "LULU", "NKE",
+    "SBUX", "MCD", "XOM", "CVX", "OXY", "SLB", "COP",
+    "JPM", "GS", "MS", "BAC", "C", "WFC", "BLK",
+    "LLY", "JNJ", "UNH", "PFE", "MRK", "ABBV", "NVO",
+    "WBD", "PARA", "SONY", "NTDOY", "F", "GM", "CAT", "DE",
+    "BA", "LVMH", "RACE", "SPY", "QQQ", "DIA", "MARA", "RIOT",
+    "HUT", "CLSK",
+}
+
+
+# financial context words (merged strong + weak)
+common_finance_words = {
+    'acquisition', 'acquire', 'analysis', 'analyst', 'antitrust', 'assets',
+    'averaged', 'bagged', 'bagging', 'bearish', 'bid', 'bond', 'boost',
+    'bullish', 'buy', 'buyback', 'calls', 'capex', 'circuit breaker',
+    'company', 'competition', 'consensus', 'contract', 'convert', 'convertible',
+    'corporation', 'coupon', 'cut', 'dark pool', 'deal', 'debt', 'decline',
+    'direct listing', 'dividend', 'down', 'drop', 'dumped', 'dumping',
+    'downgrade', 'downgraded', 'ebit', 'ebitda', 'earnings', 'eps', 'estimate',
+    'etf', 'expansion', 'fall', 'fcf', 'float', 'flow', 'follow-on', 'forecast',
+    'free cash flow', 'gain', 'gamma', 'guidance', 'growth', 'gross margin',
+    'halt', 'headcount', 'hedge fund', 'hike', 'industry', 'initiated',
+    'institutional', 'invest', 'investor', 'ipo', 'iv', 'launch', 'layoff',
+    'lbo', 'lockup', 'loss', 'ltd', 'margin', 'margins', 'market', 'market cap',
+    'market share', 'merger', 'miss', 'offer', 'operating margin', 'opex',
+    'options', 'outlook', 'partnership', 'payout', 'pe', 'pe ratio',
+    'performance', 'pipe', 'portfolio', 'position', 'positioned', 'positions',
+    'preannounce', 'prelim', 'preliminary', 'price', 'price target', 'product',
+    'profit', 'profit warning', 'puts', 'quarter', 'raise', 'reiterated',
+    'restructuring', 'revenue', 'rise', 's&p', 'scaling', 'secondary', 'sector',
+    'sees', 'sell', 'selling', 'service', 'shares', 'shareholders',
+    'short interest', 'slash', 'sold', 'sp500', 'spac', 'stock', 'strategy',
+    'strike', 'takeover', 'tech', 'theta', 'ticker', 'trade', 'trading',
+    'trend', 'trim', 'trimmed', 'turbulence', 'turbulences', 'up', 'upgrade',
+    'upgraded', 'vega', 'volatility', 'volume', 'yield',
+}
+
 
 # basic ticker config
 TICKERS = ['NVDA', 'NVIDIA', 'AMD', 'INTC', 'TSMC']
@@ -82,24 +133,6 @@ SUBREDDIT_TICKERS = {
     'stockmarket': None
 }
 
-# financial context words (merged strong + weak)
-FINANCE_CONTEXT_WORDS = {
-    'stock', 'shares', 'ticker', 'earnings', 'revenue', 'dividend', 'market cap',
-    'trading', 'investor', 'bullish', 'bearish', '$', 'calls', 'puts', 'options',
-    'portfolio', 'shareholders', 'eps', 'pe ratio', 'market share', 'guidance',
-    'analyst', 'upgrade', 'downgrade', 'price target', 'short interest', 'float',
-    'institutional', 'hedge fund', 'etf', 'ipo', 'spac', 'merger', 'acquisition',
-    'sold', 'selling', 'dumped', 'dumping', 'trim', 'trimmed', 'bagged', 'bagging',
-    'positioned', 'positions', 'averaged', 'scaling', 'volatility', 'assets',
-    'forecast', 's&p', 'sp500',
-    'buy', 'sell', 'price', 'trade', 'invest', 'market', 'position',
-    'profit', 'loss', 'analysis', 'company', 'corporation', 'inc', 'ltd', 'tech',
-    'up', 'down', 'gain', 'drop', 'rise', 'fall', 'quarter', 'growth', 'decline',
-    'performance', 'trend', 'sector', 'industry', 'competition', 'partnership',
-    'deal', 'contract', 'launch', 'product', 'service', 'expansion', 'strategy',
-    'turbulence', 'turbulences',
-}
-
 # sentiment lexicon used by SentimentScorer (extend freely)
 POSITIVE_SENTIMENT_WORDS = {
     "up", "bull", "bullish", "gain", "green", "beat", "pump", "moon", "mooning",
@@ -132,57 +165,6 @@ COMMON_WORDS = {
     "TURN", "TYPE", "WANT", "WAS", "WAY", "WEEK", "WELL", "WERE",
     "WHAT", "WHEN", "WHERE", "WHICH", "WHO", "WHY", "WILL", "WITH",
     "WORK", "WOULD", "WORTH", "YEAR", "YOU",
-}
-
-# etf categories
-ETF_CATEGORIES = {
-    'MARKET_INDEX': {
-        'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI',
-        'SPXL', 'TQQQ',
-    },
-    'SECTOR': {
-        'XLF', 'XLE', 'XLV', 'XLK', 'XLI', 'XLP', 'XLY', 'XLB', 'XLU', 'XLRE', 'XLC'
-    },
-    'COMMODITY': {
-        'GLD', 'SLV', 'USO', 'UNG', 'PHYS', 'URA'
-    },
-    'BOND': {
-        'TLT', 'IEF', 'HYG', 'LQD', 'AGG', 'BND', 'VHYG', 'TIPS',
-        'FLOT', 'SGOV', 'VGSH',
-    },
-    'INTERNATIONAL': {
-        'EFA', 'EEM', 'VEA', 'VWO', 'VGK', 'VEQT', 'VXUS'
-    },
-    'CRYPTO': {
-        'IBIT', 'BITB', 'BTCI'
-    }
-}
-
-TIMESTAMP_TICKERS = {
-    "ET", "EST", "EDT", "CT", "CST", "CDT", "PT", "PST", "PDT", "MT", "MST", "MDT", "UTC", "GMT"
-}
-
-# flatten etf list for quick lookup
-VALID_ETFS = {etf for category in ETF_CATEGORIES.values() for etf in category}
-
-# unified allow list (etfs + special non-universe symbols)
-ALWAYS_ALLOW = VALID_ETFS | {"BTC", "ETH", "SPX", "GOLD", "VXUS"}
-
-# well-known stock tickers
-WELL_KNOWN_TICKERS = {
-    "AAPL", "ACHR", "ADP", "AMC", "AMD", "AMZN", "ANET", "ANF",
-    "ASTS", "AVGO", "BABA", "BAC", "BA", "BB", "BE", "BILI",
-    "BUD", "CMCSA", "COIN", "CRWD", "CSCO", "CVS", "DASH",
-    "DIS", "DKNG", "DLTR", "EDU", "EDIT", "ESNT", "FDVV",
-    "F", "FSKAX", "FSPGX", "GE", "GGLL", "GM", "GME", "GOOG",
-    "GOOGL", "HOOD", "IBM", "INTC", "IREN", "JNJ", "JPM", "KO",
-    "KSS", "LLY", "LMT", "LSEG", "MAGA", "MCD", "META", "MSTR",
-    "MRK", "MSCI", "MSFT", "NEE", "NFLX", "NOC", "NQ", "NVDA",
-    "OKLO", "ORCL", "PATH", "PEP", "PDD", "PFE", "PHYS", "PLD",
-    "PLTR", "RDDT", "RGTI", "RGTZ", "RKLB", "RTX", "SCHD", "SEZL",
-    "SMR", "SOND", "T", "TAL", "TSLA", "UNH", "URA", "UUUU",
-    "VEQT", "VIGAX", "VHYG", "VNYTX", "VOO", "VYMI", "VZ",
-    "WB", "WBD", "WFC", "XOVR",
 }
 
 # negative context patterns that invalidate ticker matches
