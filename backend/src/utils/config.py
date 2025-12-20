@@ -6,10 +6,25 @@
 
 # later :
 # news, worldnews, finance, technology, cryptocurrency, pennystocks
+# personalfinance, algotrading, realestateinvesting, accounting
 
-SUBREDDITS = ['wallstreetbets', 'news', 'investing']
+# === consider later (requires additional handling / gating) ===
+# "news"                 # requires strong ticker anchoring
+# "worldnews"            # macro only, very noisy
+# "finance"              # mixed quality, brand/consumer noise
+# "technology"           # company names without stock intent
+# "cryptocurrency"       # separate pipeline entirely
+# "pennystocks"          # pump risk, low signal stability
+
+# === explicitly excluded (consumer / non-equity focus) ===
+# "personalfinance"      # debt, banking, credit issues
+# "algotrading"          # strategy talk, not sentiment
+# "realestateinvesting"  # asset class mismatch
+# "accounting"           # professional / technical, not market sentiment
+
+SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
 SORT_METHODS = ['new', 'top', 'hot']
-LOOKBACK = 30
+LOOKBACK = 365
 NUM_POSTS = 10
 
 # ============================================================================
@@ -18,10 +33,27 @@ NUM_POSTS = 10
 
 suffixes = (" inc", " corp", " corporation", " ltd", " plc", " sa", " nv", " ag", " co", " company", " limited")
 
+months = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"}
+
+time_tokens = { "AM", "PM", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT", "GMT", "UTC" }
+
+ambiguous = {"ON", "OR", "IT", "TGT", "ALL", "ONE", "UP", "NOW", "ANY", "TISI", "EDIT", "TILE", "NICE", "EVER", "SHOP", "HBM", "DBX"}
+
+us_states = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+}
+
 ticker_stop_terms = {
     "cfo", "ceo", "coo", "eps", "fcf", "ai", "ipo", "pt", "news", "adr", "etf", "etfs", "spac",
     "roi", "ip", "lego", "usd", "nswa", "wsbf", "for", "by", "as", "yolo", "dd", "eu", "ap", "mit", 
-    "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic"
+    "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic", "leap",
+    "pc", "id", "cs", "you", "ice", "hhs", "oz", "nov", "arr", "nyc", "tlh", "usa", "aaa", "aa", "zt",
+    "xyz",
+
 }
 
 popular_tickers = {
@@ -38,8 +70,6 @@ popular_tickers = {
     "HUT", "CLSK",
 }
 
-
-# financial context words (merged strong + weak)
 common_finance_words = {
     'acquisition', 'acquire', 'analysis', 'analyst', 'antitrust', 'assets',
     'averaged', 'bagged', 'bagging', 'bearish', 'bid', 'bond', 'boost',
@@ -66,73 +96,6 @@ common_finance_words = {
     'upgraded', 'vega', 'volatility', 'volume', 'yield',
 }
 
-
-# basic ticker config
-TICKERS = ['NVDA', 'NVIDIA', 'AMD', 'INTC', 'TSMC']
-MAX_TEXT_LENGTH = 500
-SUMMARY_LENGTH = 100
-
-# noise filters for ticker extraction
-MACRO_TERMS = {
-    'GDP', 'CPI', 'PPI', 'FOMC', 'FED', 'YCC', 'VAT', 'RATE', 'TAX',
-    'INFLATION', 'YIELD', 'TREASURY', 'JOBS', 'ENERGY', 'OPEC', 'ECB',
-    'WWII', 'AI', 'TL', 'DR'
-}
-
-WSB_SLANG = {
-    'DD', 'YOLO', 'IV', 'TA', 'FA', 'ATH', 'OTM', 'ITM', 'RH', 'FOMO',
-    'FD', 'STONK', 'GANG', 'MOASS', 'HF', 'BAG', 'PUMP', 'DUMP'
-}
-
-CONTEXT_REQUIRED_TICKERS = {
-    'AI', 'GDP', 'VAT', 'YCC', 'TL', 'DR', 'GOLD'
-}
-
-# comprehensive blacklist covering slang, macro terms, finance acronyms, TA words
-WSB_FINANCE_BLACKLIST = {
-    "A", "ADHD", "ADV", "AGAIN", "AGI", "AHH", "AI", "ALL", "AND", "ANY", "AOV", "API",
-    "ARE", "ASI", "ATH", "ATM", "AWS", "BBC", "BNPL", "BREAK", "BREAKOUT", "BS", "BULL",
-    "BUT", "CALL", "CALLS", "CAN", "CAPEX", "CARE", "CAT", "CBO", "CEO", "CFO", "CHAD", "CHEAP",
-    "CNBC", "COO", "COULD", "COVID", "CPI", "CPU", "CUDA", "DCA", "DD", "DCF", "DEAD", "DELTA",
-    "DO", "DOWN", "DR", "DUMP", "DYOR", "EDA", "EBIT", "EBITDA", "EMH", "EPS", "ESOP", "ESPN",
-    "ET", "ETF", "ETFS", "EV", "EU", "FAQ", "FAILS", "FBI", "FCF", "FDA", "FIB", "FOMO",
-    "FOMU", "FSD", "FUD", "GAIN", "GAINZ", "GAMMA", "GBP", "GEX", "GFC", "GG", "GMV", "GOD",
-    "GO", "GREAT", "GREEN", "GPU", "GPT", "HBO", "HCOL", "HIGH", "HODL", "HOT", "HOW", "HSA",
-    "HUGE", "HYSA", "III", "IMF", "IN", "IRA", "IRS", "ITM", "IV", "IVR", "JOB", "JPY",
-    "LARGE", "LEAP", "LEAPS", "LEFT", "LINE", "LLC", "LMAO", "LOL", "LOSS", "LOW", "LTCG", "LTV",
-    "MACD", "MAG", "MAANG", "MAY", "MIT", "ML", "MOASS", "MORE", "MUCH", "MUST", "NAV", "NASA",
-    "NATO", "NEXT", "NIM", "NOT", "NOW", "NTM", "NSSL", "OF", "OI", "ON", "ONE", "OS",
-    "OTC", "OTCQB", "OTCPK", "OTM", "OUT", "P", "PAT", "PBT", "PCE", "PE", "PIVOT", "PLR",
-    "PM", "PRESS", "PS", "PUMP", "PUT", "PUTS", "QOQ", "QE", "QT", "RED", "RESISTANCE", "RETURN",
-    "RFK", "RIGHT", "ROA", "ROE", "ROI", "ROTH", "RSI", "S", "SAFE", "SCALP", "SEC", "SHOULD",
-    "SHORT", "SINCE", "SMA", "STONKS", "STOCK", "STRIKE", "SUPPORT", "T", "TENDIES", "THAT", "THE", "THEM",
-    "THEY", "THETA", "THICC", "THREE", "THIS", "TIME", "TILTS", "TL", "TL;DR", "TLDR", "TOKYO", "TREND",
-    "TURN", "TWO", "UAE", "UK", "UP", "US", "USA", "USD", "VOTER", "VWAP", "WAS", "WEEKS",
-    "WENDY", "WHAT", "WHY", "WILL", "WTF", "WSB", "WSJ", "YCC", "YOLO", "YOY", "ZERO", "ZIRP",
-    "XXXXX",
-}
-
-# unified blocklist used across stages
-BLOCKLIST = WSB_FINANCE_BLACKLIST
-
-# extra stopwords removed after stage 2 to avoid false positives
-FINAL_STAGE_STOPWORDS = {
-    "YES", "RE", "PART", "MODE", "MINE", "JUICY", "STILL", "SETUP", "RJ", "MATH",
-    "OPEN", "ZERO", "GOD", "BIBLE", "DID", "HYSA", "STOCK",
-}
-
-# subreddit to ticker mapping (all lowercase keys)
-SUBREDDIT_TICKERS = {
-    'nvidia': 'NVDA',
-    'amd': 'AMD',
-    'intel': 'INTC',
-    'tsmc': 'TSMC',
-    'wallstreetbets': None,
-    'stocks': None,
-    'investing': None,
-    'stockmarket': None
-}
-
 # sentiment lexicon used by SentimentScorer (extend freely)
 POSITIVE_SENTIMENT_WORDS = {
     "up", "bull", "bullish", "gain", "green", "beat", "pump", "moon", "mooning",
@@ -147,57 +110,3 @@ NEGATIVE_SENTIMENT_WORDS = {
     "rug", "rugged", "sink", "dumped", "dropped", "halved", "wrecked", "implode",
     "panic", "sell", "sold", "fear", "beartrap"
 }
-
-# common words that might be mistaken for tickers
-COMMON_WORDS = {
-    "ABOUT", "AFTER", "ALL", "ALSO", "AND", "ARE", "BACK", "BEEN",
-    "BEING", "BEST", "BUT", "CAN", "CASE", "COME", "COULD", "DAYS",
-    "EVEN", "FACT", "FEAST", "FIND", "FIRST", "FOR", "FROM", "GIVE",
-    "GOOD", "GREAT", "HAD", "HAND", "HAS", "HAVE", "HEAD", "HELP",
-    "HERE", "HER", "HIS", "HOW", "IDEA", "INTO", "ITS", "JUST",
-    "KIND", "KNOW", "LAST", "LIFE", "LIKE", "LINE", "LIVE", "LONG",
-    "LOOK", "MAKE", "MAN", "MANY", "MAY", "MIGHT", "MORE", "MOST",
-    "MOVE", "MUCH", "MUST", "NAME", "NEED", "NEVER", "NEXT", "NOT",
-    "NOW", "OF", "OUR", "OUT", "OVER", "PART", "POST", "SAID",
-    "SAY", "SEVEN", "SHALL", "SHOULD", "SOME", "SUCH", "SURE", "TAKE",
-    "TALK", "TELL", "THAN", "THAT", "THE", "THEIR", "THEM", "THEN",
-    "THERE", "THESE", "THEY", "THINK", "THIS", "THOSE", "TIME", "TIS",
-    "TURN", "TYPE", "WANT", "WAS", "WAY", "WEEK", "WELL", "WERE",
-    "WHAT", "WHEN", "WHERE", "WHICH", "WHO", "WHY", "WILL", "WITH",
-    "WORK", "WOULD", "WORTH", "YEAR", "YOU",
-}
-
-# negative context patterns that invalidate ticker matches
-NEGATIVE_CONTEXT_PATTERNS = {
-    'COIN': ['meme coin', 'shit coin', 'shitcoin', 'alt coin', 'altcoin', 'stable coin', 'stablecoin', 'dog coin', 'dogcoin', 'moon coin', 'mooncoin', 'pump coin', 'dump coin', 'new coin', 'this coin', 'the coin', 'that coin', 'any coin', 'my coin', 'your coin', 'their coin', 'crypto coin', 'cryptocurrency', 'token'],
-    'GOLD': ['gold standard', 'gold medal', 'gold mine', 'gold rush', 'gold price'],
-    'GOOD': ['good morning', 'good night', 'good day', 'good luck', 'good job', 'good news', 'good boy'],
-    'CASH': ['cash app', 'cash out', 'cash flow', 'cash back', 'cash money'],
-    'MOON': ['to the moon', 'moon shot', 'moon boy', 'moon mission'],
-    'PUMP': ['pump and dump', 'pump scheme', 'pump group'],
-    'HOLD': ['hold on', 'hold up', 'hold tight', 'hold steady'],
-    'GAS': ['gas price', 'gas fee', 'gas station', 'gas tank'],
-    'DASH': [' - ', '--', '—', ' – '],
-    'BOT': ['robot', 'bot army', 'chatbot'],
-    'ACA': ['affordable care act', 'aca credits', 'aca subsidies'],
-}
-
-# ambiguous financial tickers that need extra validation
-AMBIGUOUS_FINANCIAL_TICKERS = {
-    'COIN': {
-        'required_context': ['coinbase', 'nasdaq:coin', 'nyse:coin'],
-        'company_terms': ['coinbase', 'armstrong', 'crypto exchange', 'cryptocurrency exchange'],
-        'min_confidence': 0.9
-    },
-    'GOLD': {
-        'required_context': ['barrick', 'barrick gold', 'gld etf', 'gold etf', 'gold shares'],
-        'company_terms': ['barrick', 'spdr', 'state street', 'gold trust'],
-        'min_confidence': 0.8
-    },
-    'CASH': {
-        'required_context': ['money market', 'cash management'],
-        'company_terms': ['money market fund', 'cash equivalent'],
-        'min_confidence': 0.9
-    }
-}
-
