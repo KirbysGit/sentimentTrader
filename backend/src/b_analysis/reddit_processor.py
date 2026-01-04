@@ -1,4 +1,3 @@
-# 
 # imports.
 import re
 import json
@@ -9,12 +8,15 @@ from colorama import Fore, Style
 from collections import defaultdict
 
 # local imports.
-from src.utils.config import suffixes, ticker_stop_terms, common_finance_words, popular_tickers, months, us_states, time_tokens, ambiguous
-from src.utils.path_config import tickers_dir, reasoning_dir
+from src.utils.config import suffixes, ticker_stop_terms, months, us_states, time_tokens, ambiguous
+from src.utils.path_config import tickers_dir, reasoning_dir, processed_reddit_by_day_dir
 from src.utils.ticker_aliases import get_canonical_alias_map
 from src.utils.ticker_context import ticker_context, negative_context
+from src.b_analysis.booster import Booster
+from src.b_analysis.sentiment_scorer import SentimentScorer
 
-class RedditProcessor:
+
+class RedditProcessor(Booster):
 
     # --- self-initialize.
 
@@ -40,6 +42,12 @@ class RedditProcessor:
         # -- 5. ticker processing info.
         self.agg_scores = defaultdict(int)
         self.agg_counts = defaultdict(int)
+
+        # -- 6. sentiment scorer.
+        self.sentiment_scorer = SentimentScorer()
+
+        # -- 7. post-ticker records (for output).
+        self.records = []
 
     # --- helper methods.
 
@@ -148,33 +156,6 @@ class RedditProcessor:
         UNIT_WARRANT_REGEX = re.compile(r"(?:-W[T]?|-U[N]?|\.W[S]?|\.U|/W[S]?|/U)$")
         return bool(UNIT_WARRANT_REGEX.search(ticker))
 
-    def find_mentions(self, combined_raw: str, bare: str, aliases):
-        # -- 1. initialize contexts and count.
-        contexts = []
-        count = 0
-        targets = {bare.lower()} | {a.lower() for a in aliases}
-
-        # -- 2. iterate through targets.
-        for target in targets:
-            # -- 2.1. create pattern.
-            pattern = rf"\b{re.escape(target)}\b"
-            # -- 2.2. iterate through matches.
-            for m in re.finditer(pattern, combined_raw, flags=re.IGNORECASE):
-                # -- 2.2.1. increment count.
-                count += 1
-                # -- 2.2.2. get span and excerpt.
-                start, end = m.span()
-                excerpt = combined_raw[max(0, start - 40): min(len(combined_raw), end + 40)]
-                contexts.append(excerpt)
-
-        # de-duplicate excerpts while preserving order for cleaner debug logs
-        seen = {}
-        for ctx in contexts:
-            seen.setdefault(ctx, True)
-        unique_contexts = list(seen.keys())
-
-        return count, unique_contexts
-        
     def is_date_like(self, tok: str, raw: str) -> bool:
         if tok not in months:
             return False
@@ -221,145 +202,6 @@ class RedditProcessor:
                 })
 
         self._append_debug(debug_hits)
-
-    # --- main boosting methods.
-    
-    def boost_tickers(self, tickers: set, title: str, text: str) -> tuple[dict, dict]:
-        if not tickers:                                          
-            return {}, {}
-        
-        # -- 1. clean up text.
-        combined = f"{title}\n{text}".strip()               
-        normalized = self.normalize_text(combined)
-        title_norm = self.normalize_text(title)
-        words = normalized.split()
-        debug_hits = []
-
-        debug_mentions = {}
-
-        # -- 2. initialize context.
-        finance_ctx = common_finance_words
-        popular_ctx = popular_tickers
-
-        scores = {}
-
-        # -- 3. iterate through tickers.
-        for t in tickers:
-
-            # -- 3.1. create ticker vars and clean formatting. (ex. tsla)
-            t_upper = t.upper()                       # $tsla - > $TSLA
-            bare = t_upper.lstrip("$")                # $TSLA - > TSLA
-            bare_norm = bare.lower()                  # tsla - > tsla
-            has_dollar = t_upper.startswith("$")      # $TSLA - > True
-
-            base = 0
-
-            # -- 3.2. check if ticker is a unit or warrant. (then we just skip.)
-            if self.is_unit_or_warrant(bare):
-                continue
-
-            # -- 3.3. check if ticker gen formatting.
-            #  - if it starts with a $ -> + 3 points.
-            #  - if it's a single letter -> + 1 point.
-            #  - otherwise -> + 2 points.
-            if has_dollar:
-                base += 4
-            elif len(bare) == 1:
-                base += 1
-            else:
-                base += 2
-            
-            # -- 3.4. check if ticker is in title.
-            #  - if so -> + 1 point.
-            if bare_norm in title_norm:
-                base += 1
-            
-            has_title_hit = bare_norm in title_norm
-            
-            # -- 3.5. check if ticker has finance context.
-            #  - if it does -> + 2 points.
-            finance_hits = 0
-            for i, w in enumerate(words):
-                if w == bare_norm:
-                    window = words[max(0, i-6): i+7]
-                    finance_hits += sum(1 for x in window if x in finance_ctx)
-
-            base += min(2, finance_hits)
-
-            # -- 3.6. get counts of ticker / alias mentions. w/ contexts of mentions.
-            #  - if so -> + 2 point.
-            aliases = [
-                alias for alias, primary in self.aliases.items() if primary == bare
-            ]
-
-            mentions, contexts = self.find_mentions(combined, bare_norm, aliases)
-
-            if mentions > 1:
-                base += min(2, mentions - 1)
-
-            # -- 3.7. drop address-like state abbreviations (e.g., ", WY")
-            #  - if so -> continue.
-            if bare in us_states and contexts:
-                ctx_has_address = False
-                for ctx in contexts:
-                    ctx_lower = ctx.lower()
-                    if re.search(r",\s*" + re.escape(bare_norm) + r"\b", ctx_lower):
-                        ctx_has_address = True
-                        break
-                if ctx_has_address:
-                    continue
-
-            # -- 3.8. negative context: use captured excerpts to penalize if any neg keywords appear
-            #  - if so -> - 2 points.
-            neg_terms = [kw.lower() for kw in negative_context.get(t_upper, [])]
-            if neg_terms and contexts:
-                neg_hits = 0
-                for ctx in contexts:
-                    ctx_lower = ctx.lower()
-                    neg_hits += sum(1 for kw in neg_terms if kw in ctx_lower)
-                if neg_hits:
-                    base = 0
-
-            # -- 3.9. check if ticker has context.
-            #  - if it does and has hits -> + 2 points.
-            #  - if it does and has no hits -> set score to 0.
-
-            ctx_list = [kw.lower() for kw in ticker_context.get(t_upper, [])]
-
-            ticker_ctx_hits = sum(1 for kw in ctx_list if kw and kw in normalized)
-
-            if bare in ambiguous:
-                if ticker_ctx_hits == 0:
-                    continue
-
-            base += min(5, ticker_ctx_hits)
-
-            # -- 3.8. context/short guards (skip only for ambiguous/short, unless strong signals)
-
-            if len(bare) == 1 and ctx_list and ticker_ctx_hits == 0:
-                continue
-
-            if len(bare) == 1 and not ctx_list and bare not in popular_ctx and not has_dollar:
-                continue
-
-            if contexts:
-                debug_mentions.setdefault(bare, []).extend(contexts)
-
-            # -- 3.9. add base score to scores dict.
-            if base > 0:
-                scores[bare] = base
-
-        return scores, debug_mentions
-
-    def clean_boosted(self, boosted: dict, abs_floor: int = 2, rel_pct: float = 0.7) -> dict:
-        if not boosted:
-            return {}
-        max_score = max(boosted.values())
-        keep = {}
-        for t, s in boosted.items():
-            if s >= abs_floor or s >= rel_pct * max_score:
-                keep[t] = s
-        return keep
 
     # --- main extraction methods.
 
@@ -429,7 +271,7 @@ class RedditProcessor:
         self.ticker_stops += len(no_stops)
 
         # -- 5. boosting.
-        boosted, debug_mentions = self.boost_tickers(no_stops, title, text)
+        boosted, mentions = self.boost_tickers(no_stops, title, text)
 
         # -- 6. per-post filtering: keep only meaningful tickers for this post.
         cleaned = self.clean_boosted(boosted, abs_floor=2, rel_pct=0.7)
@@ -441,15 +283,40 @@ class RedditProcessor:
         self.tickers_boosted += len(boosted)
 
         # -- 6.5 debug reasoning (only kept tickers).
-        kept_mentions = {t: debug_mentions.get(t, []) for t in cleaned}
+        kept_mentions = {t: mentions.get(t, []) for t in cleaned}
         self.debug_reasonings(row, kept_mentions)
         for t,s in cleaned.items():
             self.agg_scores[t] += s
             self.agg_counts[t] += 1
 
-        
-        
+        # -- 7. score sentiment per ticker (per context window).
+        subreddit = row.get("subreddit", "")
+        for ticker, boost_score in cleaned.items():
+            contexts = kept_mentions.get(ticker, [])
+            if not contexts:
+                contexts = [combined]  # fallback: whole post
 
+            for idx, ctx in enumerate(contexts):
+                sentiment_result = self.sentiment_scorer.score(ctx, subreddit=subreddit)
+
+                self.records.append({
+                    "created_utc": row.get("created_utc"),
+                    "subreddit": subreddit,
+                    "score": row.get("score", 0),
+                    "num_comments": row.get("num_comments", 0),
+                    "upvote_ratio": row.get("upvote_ratio", 0.0),
+                    "post_id": row.get("id"),
+                    "ticker": ticker,
+                    "boost_score": boost_score,
+                    "mention_idx": idx,
+                    "sentiment_score": sentiment_result["score"],
+                    "sentiment_category": sentiment_result["category"],
+                    "sentiment_model": sentiment_result["model_used"],
+                    # keep for debugging now; you can drop later to shrink output.
+                    "sentiment_context": ctx,
+                })
+
+    
     def process(self) -> pd.DataFrame:
 
         # raw data looks like :
@@ -471,14 +338,46 @@ class RedditProcessor:
             self.process_row(row)
 
         top = sorted(self.agg_scores.items(), key=lambda x: x[1], reverse=True)
-        print("tickers by total score (all):")
-        for t, s in top:
-            print(f"  {t}: {s}")
 
         top_by_posts = sorted(self.agg_counts.items(), key=lambda x: x[1], reverse=True)
-        print(f"top 10 ticker by total posts: {Fore.GREEN}{top_by_posts[:10]}{Style.RESET_ALL}")
 
+        print(f"top 10 ticker by total posts: {Fore.GREEN}{top_by_posts[:10]}{Style.RESET_ALL}")
         print(f"posts with ≥1 kept tickers: {Fore.GREEN}{self.posts_with_tickers}{Style.RESET_ALL} / {Fore.YELLOW}{self.raw_count}{Style.RESET_ALL}")
         print(f"processed {Fore.GREEN}{self.tickers_extraction}{Style.RESET_ALL} tickers from {Fore.YELLOW}{self.posts_with_tickers}{Style.RESET_ALL} posts with tickers")
         print(f"kept {Fore.GREEN}{self.ticker_stops}{Style.RESET_ALL} tickers after stop-words filter from {Fore.YELLOW}{self.tickers_extraction}{Style.RESET_ALL} candidates")
         print(f"kept {Fore.GREEN}{self.tickers_boosted}{Style.RESET_ALL} tickers after boosting (score > 0) from {Fore.YELLOW}{self.ticker_stops}{Style.RESET_ALL} candidates")
+
+        # -- 4. build output dataframe.
+        if self.records:
+            output_df = pd.DataFrame(self.records)
+
+            # keep a clean column order (only include columns that exist).
+            ordered_cols = [
+                "created_utc",
+                "subreddit",
+                "score",
+                "num_comments",
+                "upvote_ratio",
+                "post_id",
+                "ticker",
+                "boost_score",
+                "mention_idx",
+                "sentiment_score",
+                "sentiment_category",
+                "sentiment_model",
+                "sentiment_context",
+            ]
+            output_df = output_df[[c for c in ordered_cols if c in output_df.columns]]
+
+            # save to processed/by_day next to other stage outputs.
+            processed_reddit_by_day_dir.mkdir(parents=True, exist_ok=True)
+            output_path = processed_reddit_by_day_dir / f"reddit_scored_{raw_file.stem}.csv"
+            output_df.to_csv(output_path, index=False)
+
+            print(f"built {Fore.GREEN}{len(output_df)}{Style.RESET_ALL} scored records")
+            print(f"saved scored output to {Fore.YELLOW}{output_path.name}{Style.RESET_ALL}")
+            return output_df
+        
+        return pd.DataFrame()
+
+

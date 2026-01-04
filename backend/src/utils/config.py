@@ -24,7 +24,7 @@
 
 SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
 SORT_METHODS = ['new', 'top', 'hot']
-LOOKBACK = 365
+LOOKBACK = 30
 NUM_POSTS = 10
 
 # ============================================================================
@@ -37,7 +37,10 @@ months = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", 
 
 time_tokens = { "AM", "PM", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT", "GMT", "UTC" }
 
-ambiguous = {"ON", "OR", "IT", "TGT", "ALL", "ONE", "UP", "NOW", "ANY", "TISI", "EDIT", "TILE", "NICE", "EVER", "SHOP", "HBM", "DBX"}
+ambiguous = {
+    "ON", "OR", "IT", "TGT", "ALL", "ONE", "UP", "NOW", "ANY", "TISI", "EDIT", "TILE", "NICE", "EVER", 
+    "SHOP", "HBM", "DBX", "AWRE",
+}
 
 us_states = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -48,12 +51,11 @@ us_states = {
 }
 
 ticker_stop_terms = {
-    "cfo", "ceo", "coo", "eps", "fcf", "ai", "ipo", "pt", "news", "adr", "etf", "etfs", "spac",
+    "cfo", "ceo", "coo", "cto", "eps", "fcf", "ai", "ipo", "pt", "news", "adr", "etf", "etfs", "spac",
     "roi", "ip", "lego", "usd", "nswa", "wsbf", "for", "by", "as", "yolo", "dd", "eu", "ap", "mit", 
     "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic", "leap",
     "pc", "id", "cs", "you", "ice", "hhs", "oz", "nov", "arr", "nyc", "tlh", "usa", "aaa", "aa", "zt",
     "xyz",
-
 }
 
 popular_tickers = {
@@ -96,17 +98,22 @@ common_finance_words = {
     'upgraded', 'vega', 'volatility', 'volume', 'yield',
 }
 
-# sentiment lexicon used by SentimentScorer (extend freely)
-POSITIVE_SENTIMENT_WORDS = {
-    "up", "bull", "bullish", "gain", "green", "beat", "pump", "moon", "mooning",
-    "strong", "win", "positive", "profit", "surge", "soar", "rocket", "pump",
-    "rip", "squeeze", "run", "ath", "momentum", "breakout", "climb", "pumpage",
-    "jump", "skyrocket", "crush", "smash", "crank", "double", "tripled", "explode"
+# ============================================================================
+# stage 2: sentiment analysis config
+# ============================================================================
+
+# subreddit → nlp model mapping.
+# twitter-roberta: better for casual/slang (wsb, investing, stocks)
+# finbert: better for formal/analytical (securityanalysis, valueinvesting)
+
+subreddit_to_model_map = {
+    "wallstreetbets": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+    "investing": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+    "stocks": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+    "etfs": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+    "securityanalysis": "ProsusAI/finbert",
+    "valueinvesting": "ProsusAI/finbert",
+    "financialnews": "ProsusAI/finbert",
 }
 
-NEGATIVE_SENTIMENT_WORDS = {
-    "down", "bear", "bearish", "loss", "dump", "crash", "bad", "miss", "weak",
-    "negative", "red", "selloff", "plunge", "tank", "bleed", "collapse", "bag",
-    "rug", "rugged", "sink", "dumped", "dropped", "halved", "wrecked", "implode",
-    "panic", "sell", "sold", "fear", "beartrap"
-}
+default_model = "cardiffnlp/twitter-roberta-base-sentiment-latest"

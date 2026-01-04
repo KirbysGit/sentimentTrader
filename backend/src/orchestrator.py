@@ -61,6 +61,24 @@ class PipelineOrchestrator:
             
             df = processor.process()
 
+            # quick preview (first 3 rows) so we can sanity-check output shape.
+            if df is not None and not df.empty:
+                preview_cols = [
+                    "created_utc",
+                    "subreddit",
+                    "post_id",
+                    "ticker",
+                    "boost_score",
+                    "sentiment_score",
+                    "sentiment_category",
+                    "score",
+                    "num_comments",
+                    "upvote_ratio",
+                ]
+                preview_cols = [c for c in preview_cols if c in df.columns]
+                print(f"\n{Fore.CYAN}--- stage 2 preview (first 3 rows) ---{Style.RESET_ALL}")
+                print(df[preview_cols].head(3).to_string(index=False))
+            
             return df is not None and not df.empty
             
         except Exception as e:

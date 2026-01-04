@@ -1,118 +1,112 @@
-"""
-purpose:
-  provide a sentiment helper for Stage 2 so we can tag every reddit post with a
-  quick polarity score. defaults to a lexicon, but optionally upgrades to
-  FinBERT (or any Hugging Face finance sentiment model) when transformers is
-  available.
+from typing import Dict, Any
 
-what this does:
-  - lazily initializes a HF text-classification pipeline if enabled
-  - otherwise falls back to the dependency-free lexicon counts
-  - returns a float sentiment score (positive → +1, neutral → 0, negative → -1)
-"""
-
-from typing import Optional
-
-from src.utils.config import (
-    POSITIVE_SENTIMENT_WORDS,
-    NEGATIVE_SENTIMENT_WORDS,
-)
+from src.utils.config import subreddit_to_model_map, default_model
 
 
 class SentimentScorer:
-    """
-    Finance-aware sentiment engine with optional FinBERT backend.
 
-    Usage:
-        scorer = SentimentScorer(use_transformer=True)
-        score = scorer.score("NVDA earnings crushed expectations.")
+    def __init__(self):
+        # -- 1. subreddit → model mapping.
+        self.subreddit_models = subreddit_to_model_map
+        self.default_model = default_model
 
-    Notes:
-        - Setting `use_transformer=True` requires `transformers` and `torch`
-          to be installed (`pip install torch transformers`).
-        - If transformers cannot be imported or the model download fails,
-          the scorer automatically falls back to the lexicon strategy.
-    """
+        # -- 2. pipeline cache.
+        self.pipelines = {}
 
-    TRANSFORMER_MODEL = "ProsusAI/finbert"
+    # --- main scoring method ---
 
-    def __init__(self, use_transformer: bool = True):
-        self.positive = set(POSITIVE_SENTIMENT_WORDS)
-        self.negative = set(NEGATIVE_SENTIMENT_WORDS)
-        self.use_transformer = use_transformer
-        self._pipeline = None  # lazy-init to avoid startup penalty
+    def score(self, text: str, subreddit: str = None) -> Dict:
 
-    # ------------------------------------------------------------------
-    def score(self, text: str) -> float:
-        """Return sentiment score for the provided text."""
-        if not text:
-            return 0.0
+        # -- 1. select model based on subreddit.
+        model_name = self.select_model(subreddit)
 
-        text = text.strip()
-        if not text:
-            return 0.0
+        # -- 2. load pipeline.
+        pipeline = self.get_pipeline(model_name)
 
-        if self.use_transformer:
-            score = self._score_with_transformer(text)
-            if score is not None:
-                return score
-
-        # fallback lexicon score
-        words = text.lower().split()
-        pos = sum(1 for w in words if w in self.positive)
-        neg = sum(1 for w in words if w in self.negative)
-        return float(pos - neg)
-
-    # ------------------------------------------------------------------
-    def _score_with_transformer(self, text: str) -> Optional[float]:
-        """Run FinBERT if available, otherwise return None."""
-        try:
-            pipeline = self._get_pipeline()
-        except Exception:
-            return None
-
+        # -- 3. if pipeline failed to load, try else.
         if pipeline is None:
-            return None
+            if model_name != self.default_model:
+                pipeline = self.get_pipeline(self.default_model)
+                if pipeline is None:
+                    model_name = self.default_model
+                
+            if pipeline is None:
+                raise Exception(f"failed to load pipeline for model : {model_name}")
+        
 
+        # -- 4. process text with pipeline.
         try:
             result = pipeline(text, truncation=True)
         except Exception:
-            return None
+            return {
+                "score": 0.0,
+                "category": "neutral",
+                "model_used": model_name,
+            }
 
-        if not result:
-            return None
-
-        # FinBERT returns [{'label': 'positive|neutral|negative', 'score': prob}]
+        # -- 5. extract label and score from result.
         top = result[0]
-        label = top.get("label", "").lower()
-        score = float(top.get("score", 0.0))
+        label = str(top.get("label", "")).lower()
+        conf = float(top.get("score", 0.0))
 
-        if label == "positive":
-            return score
-        if label == "negative":
-            return -score
-        return 0.0  # neutral
+        if "positive" in label:
+            score = conf
+        elif "negative" in label:
+            score = -conf
+        else:
+            score = 0.0
 
-    # ------------------------------------------------------------------
-    def _get_pipeline(self):
-        """Lazy import transformers and build the HF pipeline."""
-        if self._pipeline is not None:
-            return self._pipeline
+        # -- 6. categorize from our score.
+        if score > 0.5:
+            category = "strong_bullish"
+        elif score > 0.2:
+            category = "moderate_bullish"
+        elif score > -0.2:
+            category = "neutral"
+        elif score > -0.5:
+            category = "moderate_bearish"
+        else:
+            category = "strong_bearish"
 
+        return {
+            "score": score,
+            "category": category,
+            "model_used": model_name,
+        }
+
+    # --- helper methods ---
+
+    def select_model(self, subreddit: str = None) -> str:
+        # select nlp model based on specific subreddit.
+        if subreddit and subreddit.lower() in self.subreddit_models:
+            return self.subreddit_models[subreddit.lower()]
+        
+        # if no subreddit is provided, use the default model.
+        return self.default_model
+
+    def get_pipeline(self, model_name: str) -> Any:
+        
+        # -- 1. check cache first.
+        if model_name in self.pipelines:
+            return self.pipelines[model_name]
+
+        # -- 2. import transformers.
         try:
-            from transformers import pipeline  # type: ignore
+            from transformers import pipeline
         except Exception:
-            self._pipeline = None
+            self.pipelines[model_name] = None
             return None
 
+        # -- 3. try to load the model.
         try:
-            self._pipeline = pipeline(
+            pipeline_obj = pipeline(
                 task="text-classification",
-                model=self.TRANSFORMER_MODEL,
-                tokenizer=self.TRANSFORMER_MODEL,
+                model=model_name,
+                tokenizer=model_name,
                 return_all_scores=False,
             )
+            self.pipelines[model_name] = pipeline_obj
+            return pipeline_obj
         except Exception:
-            self._pipeline = None
-
-        return self._pipeline
+            self.pipelines[model_name] = None
+            return None
