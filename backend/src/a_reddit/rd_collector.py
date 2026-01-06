@@ -10,6 +10,7 @@ from praw import Reddit
 from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, Style
+from datetime import datetime, timezone
 
 # local imports.
 from src.utils.config import (SUBREDDITS, SORT_METHODS, LOOKBACK, NUM_POSTS)
@@ -151,7 +152,7 @@ class RedditCollector:
                 flair = (post.link_flair_text or "").strip().lower()    # grab post flair.
 
                 clean.append({                                          # set up dict per post data.
-                    "created_utc": post.created_utc,
+                    "created_at": datetime.fromtimestamp(float(post.created_utc), tz=timezone.utc).isoformat(),
                     "id": post.id,
                     "subreddit": name,
                     "flair": flair,
@@ -199,7 +200,7 @@ class RedditCollector:
         final = (                                                                   
             pd.concat(all_dfs, ignore_index=True)                                   # concatenate all dfs.
             .drop_duplicates(subset=["id"])                                         # drop any duplicates.
-            .sort_values("created_utc", ascending=False)                            # sort by created time.
+            .sort_values("created_at", ascending=False)                             # sort by created time.
         )
 
         if not final.empty:                                                         # if final isn't empty.

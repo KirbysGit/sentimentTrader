@@ -36,7 +36,8 @@ class SentimentScorer:
 
         # -- 4. process text with pipeline.
         try:
-            result = pipeline(text, truncation=True)
+            # these models are 512-token max; we keep it explicit + predictable.
+            result = pipeline(text, truncation=True, max_length=512)
         except Exception:
             return {
                 "score": 0.0,
@@ -45,10 +46,34 @@ class SentimentScorer:
             }
 
         # -- 5. extract label and score from result.
+        # transformers pipeline can return either:
+        # - [ {'label': ..., 'score': ...} ]  (single top result)
+        # - [ [ {'label': ..., 'score': ...} ] ] (when top_k is used)
         top = result[0]
+        if isinstance(top, list) and top:
+            top = top[0]
+
         label = str(top.get("label", "")).lower()
         conf = float(top.get("score", 0.0))
 
+        # we need to normalize label formats bc we use diff models :
+        # - finbert returns: positive/neutral/negative
+        # - twitter-roberta often returns: label_0/label_1/label_2 (or LABEL_*)
+        if label.startswith("label_"):
+            # try model config mapping first (best).
+            try:
+                idx = int(label.split("_", 1)[1])
+                mapped = pipeline.model.config.id2label.get(idx, "").lower()  # type: ignore[attr-defined]
+            except Exception:
+                mapped = ""
+
+            # common sentiment head mapping if config isn't available.
+            if not mapped:
+                mapped = {0: "negative", 1: "neutral", 2: "positive"}.get(idx, "")
+
+            label = mapped or label
+
+        # update score based on our label.
         if "positive" in label:
             score = conf
         elif "negative" in label:
@@ -103,7 +128,7 @@ class SentimentScorer:
                 task="text-classification",
                 model=model_name,
                 tokenizer=model_name,
-                return_all_scores=False,
+                top_k=1,
             )
             self.pipelines[model_name] = pipeline_obj
             return pipeline_obj

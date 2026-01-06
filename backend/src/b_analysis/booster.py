@@ -44,7 +44,7 @@ class Booster:
         words = normalized.split()
         debug_hits = []
 
-        mentions = {}
+        debug_mentions = {}
 
         # -- 2. initialize context.
         finance_ctx = common_finance_words
@@ -101,10 +101,10 @@ class Booster:
                 alias for alias, primary in self.aliases.items() if primary == bare
             ]
 
-            mentions, contexts = self.find_mentions(combined, bare_norm, aliases)
+            mention_count, contexts = self.find_mentions(combined, bare_norm, aliases)
 
-            if mentions > 1:
-                base += min(2, mentions - 1)
+            if mention_count > 1:
+                base += min(2, mention_count - 1)
 
             # -- 3.7. drop address-like state abbreviations (e.g., ", WY")
             #  - if so -> continue.
@@ -151,7 +151,7 @@ class Booster:
                 continue
 
             if contexts:
-                mentions.setdefault(bare, []).extend(contexts)
+                debug_mentions.setdefault(bare, []).extend(contexts)
 
             bare = t_upper.lstrip("$").strip().upper()
             bare_norm = bare.lower()
@@ -160,7 +160,7 @@ class Booster:
             if base > 0:
                 scores[bare] = base
 
-        return scores, mentions
+        return scores, debug_mentions
 
     def clean_boosted(self, boosted: dict, abs_floor: int = 2, rel_pct: float = 0.7) -> dict:
         if not boosted:

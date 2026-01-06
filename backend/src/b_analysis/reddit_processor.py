@@ -4,6 +4,7 @@ import json
 import string
 import pandas as pd
 from pathlib import Path
+from datetime import datetime, timezone
 from colorama import Fore, Style
 from collections import defaultdict
 
@@ -91,6 +92,9 @@ class RedditProcessor(Booster):
                 with debug_path.open("r", encoding="utf-8") as f:
                     aggregated = json.load(f) or {}
             except Exception:
+                aggregated = {}
+        # guard against corrupted / wrong-shaped files (e.g. number, list, etc.)
+        if not isinstance(aggregated, dict):
                 aggregated = {}
 
         # -- 5. group new records by ticker and merge.
@@ -271,7 +275,7 @@ class RedditProcessor(Booster):
         self.ticker_stops += len(no_stops)
 
         # -- 5. boosting.
-        boosted, mentions = self.boost_tickers(no_stops, title, text)
+        boosted, debug_mentions = self.boost_tickers(no_stops, title, text)
 
         # -- 6. per-post filtering: keep only meaningful tickers for this post.
         cleaned = self.clean_boosted(boosted, abs_floor=2, rel_pct=0.7)
@@ -283,7 +287,7 @@ class RedditProcessor(Booster):
         self.tickers_boosted += len(boosted)
 
         # -- 6.5 debug reasoning (only kept tickers).
-        kept_mentions = {t: mentions.get(t, []) for t in cleaned}
+        kept_mentions = {t: debug_mentions.get(t, []) for t in cleaned}
         self.debug_reasonings(row, kept_mentions)
         for t,s in cleaned.items():
             self.agg_scores[t] += s
@@ -300,7 +304,7 @@ class RedditProcessor(Booster):
                 sentiment_result = self.sentiment_scorer.score(ctx, subreddit=subreddit)
 
                 self.records.append({
-                    "created_utc": row.get("created_utc"),
+                    "created_at": row.get("created_at"),
                     "subreddit": subreddit,
                     "score": row.get("score", 0),
                     "num_comments": row.get("num_comments", 0),
@@ -341,6 +345,7 @@ class RedditProcessor(Booster):
 
         top_by_posts = sorted(self.agg_counts.items(), key=lambda x: x[1], reverse=True)
 
+        # bunch of debugging info.
         print(f"top 10 ticker by total posts: {Fore.GREEN}{top_by_posts[:10]}{Style.RESET_ALL}")
         print(f"posts with ≥1 kept tickers: {Fore.GREEN}{self.posts_with_tickers}{Style.RESET_ALL} / {Fore.YELLOW}{self.raw_count}{Style.RESET_ALL}")
         print(f"processed {Fore.GREEN}{self.tickers_extraction}{Style.RESET_ALL} tickers from {Fore.YELLOW}{self.posts_with_tickers}{Style.RESET_ALL} posts with tickers")
@@ -353,7 +358,7 @@ class RedditProcessor(Booster):
 
             # keep a clean column order (only include columns that exist).
             ordered_cols = [
-                "created_utc",
+                "created_at",
                 "subreddit",
                 "score",
                 "num_comments",
@@ -369,13 +374,66 @@ class RedditProcessor(Booster):
             ]
             output_df = output_df[[c for c in ordered_cols if c in output_df.columns]]
 
-            # save to processed/by_day next to other stage outputs.
+            # layer A: per-post, per-ticker metrics
+            tmp = output_df.copy()
+            tmp["created_at"] = pd.to_datetime(tmp["created_at"], utc=True, errors="coerce")
+            tmp["created_date"] = tmp["created_at"].dt.date.astype(str)
+            tmp["engagement"] = tmp["score"].fillna(0) + tmp["num_comments"].fillna(0)
+
+            post_ticker_df = (
+                tmp.groupby(["created_date", "post_id", "ticker"], as_index=False)
+                .agg(
+                    created_at=("created_at", "min"),
+                    subreddit=("subreddit", "first"),
+                    score=("score", "max"),
+                    num_comments=("num_comments", "max"),
+                    upvote_ratio=("upvote_ratio", "max"),
+                    engagement=("engagement", "max"),
+                    boost_score=("boost_score", "max"),
+                    post_sentiment=("sentiment_score", "mean"),
+                )
+            )
+            # stringify for csv readability
+            post_ticker_df["created_at"] = post_ticker_df["created_at"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+            # layer B: per-day, per-ticker metrics
+            post_ticker_df["weighted_numer"] = post_ticker_df["post_sentiment"] * post_ticker_df["engagement"]
+
+            # our metrics.
+            daily_df = (
+                post_ticker_df.groupby(["created_date", "ticker"], as_index=False)
+                .agg(
+                    mention_count=("post_id", "nunique"),
+                    avg_sentiment=("post_sentiment", "mean"),
+                    total_engagement=("engagement", "sum"),
+                    weighted_numer=("weighted_numer", "sum"),
+                    avg_boost_score=("boost_score", "mean"),
+                    boost_score_sum=("boost_score", "sum"),
+                    subreddit_diversity=("subreddit", "nunique"),
+                )
+            )
+            daily_df["weighted_sentiment"] = daily_df.apply(
+                lambda r: (r["weighted_numer"] / r["total_engagement"]) if r["total_engagement"] else 0.0,
+                axis=1,
+            )
+            daily_df = daily_df.drop(columns=["weighted_numer"])
+
+            # -- 5. save to processed/by_day next to other stage outputs.
             processed_reddit_by_day_dir.mkdir(parents=True, exist_ok=True)
             output_path = processed_reddit_by_day_dir / f"reddit_scored_{raw_file.stem}.csv"
             output_df.to_csv(output_path, index=False)
 
+            post_ticker_path = processed_reddit_by_day_dir / f"reddit_post_ticker_{raw_file.stem}.csv"
+            post_ticker_df.to_csv(post_ticker_path, index=False)
+
+            daily_path = processed_reddit_by_day_dir / f"reddit_ticker_daily_{raw_file.stem}.csv"
+            daily_df.to_csv(daily_path, index=False)
+
             print(f"built {Fore.GREEN}{len(output_df)}{Style.RESET_ALL} scored records")
             print(f"saved scored output to {Fore.YELLOW}{output_path.name}{Style.RESET_ALL}")
+            print(f"saved post-ticker output to {Fore.YELLOW}{post_ticker_path.name}{Style.RESET_ALL}")
+            print(f"saved ticker-daily output to {Fore.YELLOW}{daily_path.name}{Style.RESET_ALL}")
+            
             return output_df
         
         return pd.DataFrame()

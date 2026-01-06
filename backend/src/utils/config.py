@@ -22,7 +22,9 @@
 # "realestateinvesting"  # asset class mismatch
 # "accounting"           # professional / technical, not market sentiment
 
-SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
+# 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews'
+
+SUBREDDITS = ['wallstreetbets', 'investing', 'stocks']
 SORT_METHODS = ['new', 'top', 'hot']
 LOOKBACK = 30
 NUM_POSTS = 10

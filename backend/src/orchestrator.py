@@ -64,7 +64,7 @@ class PipelineOrchestrator:
             # quick preview (first 3 rows) so we can sanity-check output shape.
             if df is not None and not df.empty:
                 preview_cols = [
-                    "created_utc",
+                    "created_at",
                     "subreddit",
                     "post_id",
                     "ticker",
@@ -77,7 +77,7 @@ class PipelineOrchestrator:
                 ]
                 preview_cols = [c for c in preview_cols if c in df.columns]
                 print(f"\n{Fore.CYAN}--- stage 2 preview (first 3 rows) ---{Style.RESET_ALL}")
-                print(df[preview_cols].head(3).to_string(index=False))
+                print(df[preview_cols].head(10).to_string(index=False))
             
             return df is not None and not df.empty
             
