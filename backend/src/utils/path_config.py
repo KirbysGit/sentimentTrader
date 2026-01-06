@@ -23,6 +23,7 @@ reasoning_dir = data_dir / "reasoning"
 seen_path = data_dir / "seen_post_ids.json"
 
 raw_reddit_dir = raw_dir / "reddit"
+raw_stocks_dir = raw_dir / "stocks"
 processed_reddit_by_day_dir = processed_dir / "reddit" / "by_day"
 processed_metrics_dir = processed_dir / "metrics"
 
@@ -35,6 +36,7 @@ _REQUIRED_DIRECTORIES = [
     raw_dir,
     processed_dir,
     raw_reddit_dir,
+    raw_stocks_dir,
     processed_reddit_by_day_dir,
     processed_metrics_dir,
 ]

@@ -24,7 +24,7 @@
 
 # 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews'
 
-SUBREDDITS = ['wallstreetbets', 'investing', 'stocks']
+SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
 SORT_METHODS = ['new', 'top', 'hot']
 LOOKBACK = 30
 NUM_POSTS = 10
@@ -119,3 +119,12 @@ subreddit_to_model_map = {
 }
 
 default_model = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+
+# ============================================================================
+# stage 3: ticker selection (watchlist) config
+# ============================================================================
+
+topN = 20
+min_mentions = 2
+min_engagement = 20
+lookback_days = 90
