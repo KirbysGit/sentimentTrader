@@ -26,8 +26,8 @@
 
 SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
 SORT_METHODS = ['new', 'top', 'hot']
-LOOKBACK = 30
-NUM_POSTS = 10
+LOOKBACK = 90
+NUM_POSTS = 200
 
 # ============================================================================
 # stage 2: ticker analysis config
@@ -128,3 +128,11 @@ topN = 20
 min_mentions = 2
 min_engagement = 20
 lookback_days = 90
+
+# ============================================================================
+# stage 5: training config
+# ============================================================================
+
+# how much history to use when training from merged_features_all.csv
+# (keeps training time bounded as the dataset grows)
+train_lookback_days = 365
