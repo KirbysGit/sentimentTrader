@@ -10,11 +10,11 @@ from praw import Reddit
 from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, Style
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # local imports.
-from src.utils.config import (SUBREDDITS, SORT_METHODS, LOOKBACK, NUM_POSTS)
-from src.utils.path_config import (env_path, seen_path, raw_reddit_dir)
+from src.utils.config import (subreddits, sort_methods, lookback, num_posts, max_comments_per_post, max_comments_chars)
+from src.utils.path_config import (env_path, last_seen_created_utc_path, raw_reddit_dir)
 
 # get our .env vars.
 load_dotenv(env_path)
@@ -38,22 +38,49 @@ class RedditCollector:
         )
 
         # -- 3. set up some pipeline config data.
-        self.lookback = LOOKBACK
-        self.num_posts = NUM_POSTS
-        self.subreddits = SUBREDDITS
-        self.sorts = SORT_METHODS
+        self.lookback = lookback
+        self.num_posts = num_posts
+        self.subreddits = subreddits
+        self.sorts = sort_methods
 
-        # -- 4. get time filter
-        self.time_filter = self.get_time_filter()
-
-        # -- 5. set up our seen directory.
-        self.seen = self.load_seen_ids(seen_path)
+        # -- 4. cursor for incremental "newer-than-last-run" fetching.
+        self.last_seen_created_utc = load_cursor(last_seen_created_utc_path)
+        self.cutoff_utc = (datetime.now(timezone.utc) - timedelta(days=int(self.lookback))).timestamp()
 
         # -- 6. build data directory based on day.
         self.data_dir = self.build_day_dir(raw_reddit_dir, self.run_date)
         os.makedirs(self.data_dir, exist_ok=True)
 
     # --- helper functions.
+
+    def load_cursor(path: Path) -> dict[str, float]:
+        # file is just {subreddit: last_seen_created_utc}
+        if not path.exists():
+            return {}
+        try:
+            # open the json file and load the data.
+            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if not isinstance(data, dict):
+                return {}
+
+            # iterate through the data and convert to float.
+            out: dict[str, float] = {}
+            for k, v in data.items():
+                try:
+                    out[str(k)] = float(v)
+                except Exception:
+                    continue
+
+            # return the data.
+            return out
+        except Exception:
+            return {}
+
+    def save_cursor(path: Path, cursor: dict[str, float]) -> None:
+        try:
+            path.write_text(json.dumps(cursor, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     @staticmethod
     def build_day_dir(root: Path, run_date: str) -> Path:
@@ -76,83 +103,76 @@ class RedditCollector:
         )
         return any(marker in lower for marker in markers)
 
-    def get_time_filter(self) -> str:
-        # based on lookback value, adjust sort.
-        if self.lookback < 1:
-            return "hour"
-        elif self.lookback == 1:
-            return "day"
-        elif self.lookback <= 7:
-            return "week"
-        elif self.lookback <= 30:
-            return "month"
-        else:
-            return "year"    
+    @staticmethod
+    def clean_comment_text(s: str) -> str:
+        s = (s or "").strip()
+        if not s:
+            return ""
+        low = s.lower()
+        if low in {"[deleted]", "[removed]"}:
+            return ""
+        return " ".join(s.split())
 
-    def load_seen_ids(self, seen_path) -> set[str]:
-        if not seen_path.exists():                                  # verify path exists.
-            return set()
-        try:                                                        # if it does.
-            with open(seen_path, "r", encoding="utf-8") as file:    # open file up.
-                data = json.load(file)                              # parses json file into py objs.
-                return {str(x) for x in data if x}                  # for piece of data, turn to string.
-        except Exception as e:
-            print("can't find seen ids 😭")
-            return set()
-    
-    def add_seen_ids(self) -> None:
+    def get_comments_text(self, post) -> str:
+        # grabs top N comments and concatenate bodies.
         try:
-            with open(seen_path, "w", encoding="utf-8") as file:    # write new seen_ids to json.
-                json.dump(sorted(self.seen), file, indent=2)
-        except Exception as e:
-            print(f"unable to add seen ids 😭")
-    
-    def check_for_image(self, post):
-        post_hint = getattr(post, "post_hint", None)                                    # get post hint val.
+            post.comment_sort = "top"
+            post.comments.replace_more(limit=0)
 
-        if post_hint in {"image", "hosted:video", "rich:video"}:                        # if post is image or vid.
-            return True                                                                 # then, get rid of it.
+            # iterate through the comments and clean the text.
+            parts = []
 
-        if getattr(post, "is_gallery", False):                                          # if post is gallery.
-            return True                                                                 # then get rid of it.
-        url_lower = (getattr(post, "url", "") or "").lower()
-        if url_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".gifv")):     # if post ends with image.
-            return True                                                                 # then get rid of it.
+            for c in post.comments[: int(max_comments_per_post)]:
+                body = self.clean_comment_text(getattr(c, "body", "") or "")
+                if body:
+                    parts.append(body)
+                if sum(len(x) for x in parts) >= int(max_comments_chars):
+                    break
 
-        return False                                                                    # else keep post.
+            # join the parts and strip whitespace.
+            out = "\n".join(parts).strip()
+            return out[: int(max_comments_chars)]
+        except Exception:
+            return ""
     
     # --- main data fetching and processing ---
 
-    def get_posts(self, subreddit, sort) -> []:
-        if sort == "hot":
-            return subreddit.hot(limit=self.num_posts)
-        if sort == "new":
-            return subreddit.new(limit=self.num_posts)
-        if sort == "top":
-            return subreddit.top(limit=self.num_posts, time_filter=self.time_filter)
-        return []
-
     def fetch_subreddit_posts(self, name: str, sort: str):
         try:
-            subreddit = self.reddit.subreddit(name)                     # get actual subreddit name.
-            posts = self.get_posts(subreddit, sort)                     # fetch posts from subreddit w/ sort.
+            # get actual subreddit name.
+            subreddit = self.reddit.subreddit(name)
+
+            # we run incremental off "new" only.
+            posts = subreddit.new(limit=self.num_posts)
             clean = []
+            since_utc = float(self.last_seen_created_utc.get(name, 0.0) or 0.0)
+            max_created_utc = since_utc
 
             for post in posts:                                          # iterate through posts.
-                if post.id in self.seen:                                # if we've already seen post.
-                    continue                                            # skip it.
+                created_utc = float(getattr(post, "created_utc", 0.0) or 0.0)
 
-                if self.check_for_image(post):                          # if post has image.
-                    continue                                            # skip it.
+                # chronological cutoffs: break early.
+                if created_utc and created_utc < self.cutoff_utc:
+                    break
+                if created_utc and created_utc <= since_utc:
+                    break
 
+                # NOTE: we keep media/link posts; title-only still carries tickers/sentiment.
                 body = post.selftext if post.selftext else ""
-                if self.is_unrenderable_text(body):                     # if unsupported text format.
+
+                # if unsupported text format, skip.
+                if self.is_unrenderable_text(body):
                     continue
                 
-                flair = (post.link_flair_text or "").strip().lower()    # grab post flair.
+                # grab post flair.
+                flair = (post.link_flair_text or "").strip().lower()
 
-                clean.append({                                          # set up dict per post data.
-                    "created_at": datetime.fromtimestamp(float(post.created_utc), tz=timezone.utc).isoformat(),
+                # get the comments text.
+                comments_text = self.get_comments_text(post)
+
+                # set up dict per post data.
+                clean.append({
+                    "created_at": datetime.fromtimestamp(created_utc, tz=timezone.utc).isoformat(),
                     "id": post.id,
                     "subreddit": name,
                     "flair": flair,
@@ -161,8 +181,17 @@ class RedditCollector:
                     "num_comments": post.num_comments,
                     "title": post.title,
                     "text": post.selftext,
+                    "comments_text": comments_text,
                     "link": f"https://www.reddit.com{post.permalink}",
                 })
+
+                # update the max created utc.
+                if created_utc and created_utc > max_created_utc:
+                    max_created_utc = created_utc
+
+            # update the cursor for next run.
+            if max_created_utc > since_utc:
+                self.last_seen_created_utc[name] = max_created_utc
 
             return pd.DataFrame(clean) if clean else None               # return dataframe of posts.
         
@@ -195,6 +224,10 @@ class RedditCollector:
                     print(f"{Fore.RED}we got no posts 😡{Style.RESET_ALL}")
             print()
         
+        if not all_dfs:
+            print(f"we got {Fore.GREEN}0{Style.RESET_ALL} total posts from our original {Fore.YELLOW}0{Style.RESET_ALL} posts")
+            return None
+
         pre_clean = len(pd.concat(all_dfs))                                         # grab pre-clean len.
 
         final = (                                                                   
@@ -203,11 +236,8 @@ class RedditCollector:
             .sort_values("created_at", ascending=False)                             # sort by created time.
         )
 
-        if not final.empty:                                                         # if final isn't empty.
-            new_ids = {str(i) for i in final["id"].dropna().astype(str) if i}       # grab list of new ids.
-            if new_ids:
-                self.seen.update(new_ids)                                           # update our local ids.
-                self.add_seen_ids()                                                 # add those ids to the json.
+        # persist cursor (so next run is "newer chronological posts only").
+        self.save_cursor(last_seen_created_utc_path, self.last_seen_created_utc)
         
         filename = f"reddit_posts_{self.run_id}.csv"                                # set up run name.
         output_path = self.data_dir / filename                                      # set up our output path.

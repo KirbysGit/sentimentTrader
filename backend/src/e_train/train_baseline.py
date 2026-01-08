@@ -1,30 +1,34 @@
 from __future__ import annotations
 
+
+# standard imports.
+import joblib
+import pandas as pd
+from typing import Dict
+from pathlib import Path
+from colorama import Fore, Style
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Dict
 
-import pandas as pd
-from colorama import Fore, Style
-import joblib
-
+# training imports.
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 
+# local imports.
 from src.utils.path_config import processed_metrics_dir
 from src.utils.config import train_lookback_days
 
 
 @dataclass
 class TrainResult:
+    # --- data class for training results.
     ok: bool
     report_path: Path
     model_path: Path
     metrics: Dict[str, float]
 
 
-def _time_split(df: pd.DataFrame, test_frac: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
+def time_split(df: pd.DataFrame, test_frac: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
     # simple time-based split (last X% of rows as test).
     n = len(df)
     cut = max(1, int(n * (1.0 - test_frac)))
@@ -70,7 +74,7 @@ def train_baseline(merged_features_path: Path, test_frac: float = 0.2) -> TrainR
         df = df[df["date"] >= cutoff].copy()
 
     # split the dataframe into train and test sets.
-    train_df, test_df = _time_split(df, test_frac=test_frac)
+    train_df, test_df = time_split(df, test_frac=test_frac)
 
     # train the model.
     model = LogisticRegression(max_iter=2000)
@@ -82,14 +86,14 @@ def train_baseline(merged_features_path: Path, test_frac: float = 0.2) -> TrainR
     long_threshold = 0.60
     short_threshold = 0.40
 
-    # calculate the metrics.
+    # ---calculate the metrics.
     y_true = test_df["y_up_1d"].astype(int).values
     metrics: Dict[str, float] = {}
     metrics["accuracy"] = float(accuracy_score(y_true, pred))
     metrics["precision"] = float(precision_score(y_true, pred, zero_division=0))
     metrics["recall"] = float(recall_score(y_true, pred, zero_division=0))
 
-    # training metadata (so artifacts are self-describing).
+    # --- training metadata (so artifacts are self-describing).
     train_start = train_df["date"].min()
     train_end = train_df["date"].max()
     test_start = test_df["date"].min()
@@ -99,17 +103,17 @@ def train_baseline(merged_features_path: Path, test_frac: float = 0.2) -> TrainR
     test_up = int(test_df["y_up_1d"].sum())
     test_down = int((test_df["y_up_1d"] == 0).sum())
 
-    # write the report (test rows only).
+    # --- write the report (test rows only).
     report = test_df[["ticker", "date", "y_ret_1d", "y_up_1d"] + feature_cols].copy()
     report["pred_up_1d"] = pred
     report["pred_prob_up_1d"] = prob_up
 
-    # trading signal (three-way)
+    # --- trading signal (three-way)
     report["signal"] = "hold"
     report.loc[report["pred_prob_up_1d"] >= long_threshold, "signal"] = "long"
     report.loc[report["pred_prob_up_1d"] <= short_threshold, "signal"] = "short"
 
-    # confidence bucket.
+    # --- confidence bucket.
     report["confidence_bucket"] = "low"
     report.loc[(report["pred_prob_up_1d"] >= long_threshold) | (report["pred_prob_up_1d"] <= short_threshold), "confidence_bucket"] = "high"
     report.loc[
@@ -118,20 +122,22 @@ def train_baseline(merged_features_path: Path, test_frac: float = 0.2) -> TrainR
         "confidence_bucket",
     ] = "medium"
 
-    # pnl proxy : long => y_ret_1d, short => -y_ret_1d, hold => 0
+    # --- pnl proxy : long => y_ret_1d, short => -y_ret_1d, hold => 0
     report["pnl_proxy"] = 0.0
     report.loc[report["signal"] == "long", "pnl_proxy"] = report.loc[report["signal"] == "long", "y_ret_1d"]
     report.loc[report["signal"] == "short", "pnl_proxy"] = -report.loc[report["signal"] == "short", "y_ret_1d"]
 
+    # --- write the report to a csv file.
     report.to_csv(report_path, index=False)
 
-    # save model artifact (so big runs are not wasted).
+    # --- save model artifact (so big runs are not wasted).
     models_dir = processed_metrics_dir.parent / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     model_path = models_dir / f"baseline_logreg_{stem}_{run_id}.joblib"
     latest_path = models_dir / "baseline_logreg_latest.joblib"
 
+    # --- create the artifact.
     artifact = {
         "model_type": "logistic_regression",
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -159,10 +165,12 @@ def train_baseline(merged_features_path: Path, test_frac: float = 0.2) -> TrainR
         "metrics": metrics,
         "model": model,
     }
+
+    # --- save the artifact.
     joblib.dump(artifact, model_path)
     joblib.dump(artifact, latest_path)
 
-    # print the report path and metrics.
+    # --- print the report path and metrics.
     print(f"{Fore.CYAN}stage 5 - wrote training report to: {Style.RESET_ALL}{report_path.name}")
     print(f"{Fore.CYAN}stage 5 - saved model to: {Style.RESET_ALL}{model_path.name}")
     print(f"{Fore.CYAN}stage 5 - metrics: {Style.RESET_ALL}{metrics}")

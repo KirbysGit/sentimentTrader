@@ -21,6 +21,7 @@ reasoning_dir = data_dir / "reasoning"
 
 # data subdirectory.
 seen_path = data_dir / "seen_post_ids.json"
+last_seen_created_utc_path = data_dir / "last_seen_created_utc.json"
 
 raw_reddit_dir = raw_dir / "reddit"
 raw_stocks_dir = raw_dir / "stocks"

@@ -254,10 +254,12 @@ class RedditProcessor(Booster):
         # -- 1. grab the title and text for extraction.
         title_col = row.get("title", "")
         text_col = row.get("text", "")
+        comments_col = row.get("comments_text", "")
         title = "" if not isinstance(title_col, str) else title_col
         text = "" if not isinstance(text_col, str) else text_col
+        comments_text = "" if not isinstance(comments_col, str) else comments_col
 
-        combined = f"{title}\n{text}".strip()
+        combined = f"{title}\n{text}\n{comments_text}".strip()
         
         # -- 2. extract tickers.
         ticker_hits = self.extract_tickers(combined)
@@ -275,7 +277,9 @@ class RedditProcessor(Booster):
         self.ticker_stops += len(no_stops)
 
         # -- 5. boosting.
-        boosted, debug_mentions = self.boost_tickers(no_stops, title, text)
+        # pass comments alongside body text (keeps title separate for boosting logic).
+        full_text = f"{text}\n{comments_text}".strip()
+        boosted, debug_mentions = self.boost_tickers(no_stops, title, full_text)
 
         # -- 6. per-post filtering: keep only meaningful tickers for this post.
         cleaned = self.clean_boosted(boosted, abs_floor=2, rel_pct=0.7)

@@ -12,6 +12,7 @@ class SentimentScorer:
 
         # -- 2. pipeline cache.
         self.pipelines = {}
+        self.device = self.select_device()
 
     # --- main scoring method ---
 
@@ -115,6 +116,10 @@ class SentimentScorer:
         if model_name in self.pipelines:
             return self.pipelines[model_name]
 
+        # -- 2. decide device (gpu if available, else cpu).
+        # transformers pipeline uses: device=-1 for cpu, device=0 for first cuda gpu.
+        device = self.device
+
         # -- 2. import transformers.
         try:
             from transformers import pipeline
@@ -129,9 +134,20 @@ class SentimentScorer:
                 model=model_name,
                 tokenizer=model_name,
                 top_k=1,
+                device=device,
             )
             self.pipelines[model_name] = pipeline_obj
             return pipeline_obj
         except Exception:
             self.pipelines[model_name] = None
             return None
+
+        def select_device(self) -> int:
+            # keep it simple: use gpu if torch sees one, else cpu.
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    return 0
+            except Exception:
+                pass
+            return -1

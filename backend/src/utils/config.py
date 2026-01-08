@@ -24,10 +24,14 @@
 
 # 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews'
 
-SUBREDDITS = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
-SORT_METHODS = ['new', 'top', 'hot']
-LOOKBACK = 90
-NUM_POSTS = 200
+subreddits = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
+sort_methods = ['new']
+lookback = 365
+num_posts = 300
+
+# comments ingestion (stage 1)
+max_comments_per_post = 20
+max_comments_chars = 4000
 
 # ============================================================================
 # stage 2: ticker analysis config

@@ -73,6 +73,11 @@ class StockCollector:
                 elif "index" in df.columns:
                     df = df.rename(columns={"index": "date"})
 
+            # normalize date to a simple YYYY-MM-DD string.
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date.astype(str)
+                df = df.dropna(subset=["date"])
+
             # tag rows so we can concat multiple tickers into one table.
             df["ticker"] = t
 
@@ -84,6 +89,8 @@ class StockCollector:
             # write/update per-ticker file (dedupes by date).
             if ticker_path.exists():
                 existing = pd.read_csv(ticker_path)
+                if "date" in existing.columns:
+                    existing["date"] = existing["date"].astype(str)
                 merged = pd.concat([existing, df], ignore_index=True)
                 if "date" in merged.columns:
                     merged = merged.drop_duplicates(subset=["date"], keep="last").sort_values("date")
