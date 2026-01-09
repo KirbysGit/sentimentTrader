@@ -13,7 +13,8 @@ backend_dir = current_dir.parent
 sys.path.insert(0, str(backend_dir))
 
 # pipeline stage imports.
-from src.a_reddit.rd_collector import RedditCollector
+from src.a_social.rd_collector import RedditCollector
+from src.a_social.stocktwits_collector import StocktwitsCollector
 from src.b_analysis.reddit_processor import RedditProcessor
 from src.c_stocks.stock_collector import StockCollector
 from src.d_merge.feature_builder import FeatureBuilder
@@ -42,6 +43,9 @@ class PipelineOrchestrator:
 
         # -- 2.5. after phase 2 : our stage 3 tickers passed on.                                             
         self.stage3_tickers = []
+
+        # -- 2.75. optional stocktwits collector.
+        self.stocktwits_collector = StocktwitsCollector()
 
         # -- 3. stage 3 collector (single instance).
         self.stock_collector = StockCollector()
@@ -95,6 +99,19 @@ class PipelineOrchestrator:
         except Exception as e:
             print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
+
+    # stage 2.5 - optional stocktwits ingest (non-fatal)
+    def collect_stocktwits(self):
+        try:
+            tickers = self.stage3_tickers or []
+            if not tickers or not self.raw_output_path:
+                return True
+            stem = Path(self.raw_output_path).stem
+            self.stocktwits_collector.collect(tickers=tickers, stem=stem, run_id=self.run_id)
+            return True
+        except Exception as e:
+            print(f"{Fore.YELLOW}stage 2.5 - stocktwits skipped: {e}{Style.RESET_ALL}")
+            return True
             
     # stage 3 - collecting relevant stock data.
     def collect_stock_data(self):
@@ -178,6 +195,10 @@ def main():
     else:
         print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")
 
+    # phase 2.5 : optional stocktwits ingest (never blocks pipeline).
+    orchestrator.collect_stocktwits()
+
+    break
 
     # phase 3 : collect stock data.
     if orchestrator.collect_stock_data():

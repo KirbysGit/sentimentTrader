@@ -12,3 +12,5 @@ __pycache__/
 
 reddit_config.py
 diagnostics/
+models/
+data/

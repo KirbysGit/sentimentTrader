@@ -33,6 +33,10 @@ num_posts = 300
 max_comments_per_post = 20
 max_comments_chars = 4000
 
+# stocktwits ingestion (optional)
+stocktwits_limit_per_ticker = 30
+stocktwits_score_sentiment = True
+
 # ============================================================================
 # stage 2: ticker analysis config
 # ============================================================================

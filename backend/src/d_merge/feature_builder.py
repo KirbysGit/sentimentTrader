@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from colorama import Fore, Style
 
-from src.utils.path_config import processed_reddit_by_day_dir, processed_metrics_dir
+from src.utils.path_config import processed_reddit_by_day_dir, processed_metrics_dir, processed_stocktwits_by_day_dir
 
 
 class FeatureBuilder:
@@ -49,6 +49,20 @@ class FeatureBuilder:
         if tickers:
             want = {str(t) for t in tickers if t is not None}
             daily = daily[daily["ticker"].isin(want)].copy()
+
+        # optional: merge stocktwits daily (if exists) onto the reddit daily table.
+        st_path = processed_stocktwits_by_day_dir / f"stocktwits_ticker_daily_{stem}.csv"
+        if st_path.exists():
+            st = pd.read_csv(st_path)
+            if not st.empty:
+                st["ticker"] = st["ticker"].astype(str)
+                st["date"] = st["date"].astype(str)
+                keep = ["ticker", "date", "st_mention_count", "st_total_likes", "st_weighted_sentiment"]
+                st = st[[c for c in keep if c in st.columns]].copy()
+                daily = daily.merge(st, on=["ticker", "date"], how="left")
+                for c in ["st_mention_count", "st_total_likes", "st_weighted_sentiment"]:
+                    if c in daily.columns:
+                        daily[c] = pd.to_numeric(daily[c], errors="coerce").fillna(0)
 
         # load stock rows for tickers (long format).
         stock_rows = []
