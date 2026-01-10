@@ -13,7 +13,7 @@ backend_dir = current_dir.parent
 sys.path.insert(0, str(backend_dir))
 
 # pipeline stage imports.
-from src.a_social.rd_collector import RedditCollector
+from src.a_social.reddit_collector import RedditCollector
 from src.a_social.stocktwits_collector import StocktwitsCollector
 from src.b_analysis.reddit_processor import RedditProcessor
 from src.c_stocks.stock_collector import StockCollector
@@ -33,86 +33,77 @@ class PipelineOrchestrator:
     def __init__(self):
         print(f"{Fore.CYAN}=== pipeline 🤓 is ready!===\n{Style.RESET_ALL}")
 
-        # -- 1. run start data.
-        self.run_ts = datetime.now(timezone.utc)                            # run time.
-        self.run_date = self.run_ts.date().isoformat()                      # run date.
-        self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")                 # run id.
+        # -- pre-run start data.
+        self.run_ts = datetime.now(timezone.utc)
+        self.run_date = self.run_ts.date().isoformat()
+        self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")
 
-        # -- 2. after phase 1 : our reddit dir
-        self.raw_output_path = None                                             
+        # -- 1. reddit collector.
+        self.reddit_collector = RedditCollector(run_date=self.run_date, run_id=self.run_id)                                    
 
-        # -- 2.5. after phase 2 : our stage 3 tickers passed on.                                             
-        self.stage3_tickers = []
+        # -- 2. reddit processor.
+        self.reddit_processor = RedditProcessor()
+        self.post_processing_tickers = []
 
-        # -- 2.75. optional stocktwits collector.
+        # -- 3. stocktwits collector. (feature sourcer)
         self.stocktwits_collector = StocktwitsCollector()
+        self.stocktwits_messages_path = None
+        self.stocktwits_daily_path = None
 
-        # -- 3. stage 3 collector (single instance).
+        # -- 4. stock collector (single instance).
         self.stock_collector = StockCollector()
-
-        # -- 4. stage 3 output dir (set after stage 3 runs).
         self.stocks_by_ticker_dir = None
 
-        # -- 5. stage 4 builder (single instance).
+        # -- 5. feature builder (single instance).
         self.feature_builder = FeatureBuilder()
-
-        # -- 6. stage 4 output path (set after stage 4 runs).
         self.merged_features_path = None
             
     # stage 1 - reddit collection.
 
     def collect_reddit_data(self):
         try:
-            collector = RedditCollector(run_date=self.run_date, run_id=self.run_id)
-            
-            output_path = collector.fetch_data()
-            success = output_path is not None
-
-            if success:
-                self.raw_output_path = output_path
-                return success
-            else:
-                return False
-            
+            return self.reddit_collector.fetch_data()
         except Exception as e:
             print(f"{Fore.RED}stage 1 - uh oh 🚨 : {e} {Style.RESET_ALL}")
-            return False
+            return None
 
-    # stage 2 - process reddit data.
-
-    def process_reddit_data(self):
+    # stage 2 - process reddit data and set top tickers.
+    def process_social_data(self, df: pd.DataFrame):
         try:
-            processor = RedditProcessor(input_file=self.raw_output_path)
-            
-            df = processor.process()
+            processed = self.reddit_processor.process(df=df)
 
-            # -- 1. grab top tickers from daily metrics.
-            if df is not None and not df.empty:
-                tickers = grab_top_tickers(self.raw_output_path)
-                self.stage3_tickers = tickers
-                print(f"\n{Fore.CYAN}--- stage 3 prep (selected tickers) ---{Style.RESET_ALL}")
-                print(tickers)
+            ok = processed is not None and not processed.empty
 
-            # -- 2. return success.
-            return df is not None and not df.empty
+            if not ok:
+                print(f"{Fore.RED}stage 2 - no data found after processing 😡{Style.RESET_ALL}")
+                return None
+
+            # -- 2. grab top tickers from daily metrics.
+            self.post_processing_tickers = grab_top_tickers(processed=processed)
+
+            print(f"\n{Fore.CYAN}--- after processing, we have these tickers ---{Style.RESET_ALL}")
+            print(set(self.post_processing_tickers))
+
+            return True
             
+    # stage 3 - grab data from stocktwits on relevant tickers.
+    def source_features(self):
+        try:
+            tickers = self.post_processing_tickers or []
+            if tickers and self.raw_output_path:
+                stem = Path(self.raw_output_path).stem
+                msgs_path, daily_path = self.stocktwits_collector.collect_and_process(
+                    tickers=tickers,
+                    stem=stem,
+                    run_id=self.run_id,
+                )
+                self.stocktwits_messages_path = msgs_path
+                self.stocktwits_daily_path = daily_path
+                return True
         except Exception as e:
             print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
 
-    # stage 2.5 - optional stocktwits ingest (non-fatal)
-    def collect_stocktwits(self):
-        try:
-            tickers = self.stage3_tickers or []
-            if not tickers or not self.raw_output_path:
-                return True
-            stem = Path(self.raw_output_path).stem
-            self.stocktwits_collector.collect(tickers=tickers, stem=stem, run_id=self.run_id)
-            return True
-        except Exception as e:
-            print(f"{Fore.YELLOW}stage 2.5 - stocktwits skipped: {e}{Style.RESET_ALL}")
-            return True
-            
     # stage 3 - collecting relevant stock data.
     def collect_stock_data(self):
         try:
@@ -182,25 +173,29 @@ def main():
     orchestrator = PipelineOrchestrator()
 
     # phase 1 : collect reddit.
-
     if orchestrator.collect_reddit_data():
+        df = orchestrator.reddit_collector.fetch_data()
         print(f"{Fore.CYAN}=== ✓ stage 1 done! ===\n{Style.RESET_ALL}")
     else:
+        print(f"{Fore.YELLOW}=== no new reddit data collected. stopping pipeline (try again later). ===\n\n{Style.RESET_ALL}")
         print(f"{Fore.RED}=== ✗ stage 1 failed! ===\n{Style.RESET_ALL}")
         return
 
-    # phase 2 : process reddit.
-    if orchestrator.process_reddit_data():
+    # phase 2 : process reddit data.
+    if orchestrator.process_social_data(df=df):
         print(f"{Fore.CYAN}=== ✓ stage 2 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")
+        return
+    
+    # phase 3 : source features from stocktwits.
+    if orchestrator.source_features():
+        print(f"{Fore.CYAN}=== ✓ stage 3 done! ===\n{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}=== ✗ stage 3 failed! ===\n{Style.RESET_ALL}")
+        return
 
-    # phase 2.5 : optional stocktwits ingest (never blocks pipeline).
-    orchestrator.collect_stocktwits()
-
-    break
-
-    # phase 3 : collect stock data.
+    # phase 4 : collect stock data.
     if orchestrator.collect_stock_data():
         print(f"{Fore.GREEN}=== ✓ stage 3 done! ===\n{Style.RESET_ALL}")
     else:

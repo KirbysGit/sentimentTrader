@@ -13,18 +13,19 @@ from src.utils.config import suffixes, ticker_stop_terms, months, us_states, tim
 from src.utils.path_config import tickers_dir, reasoning_dir, processed_reddit_by_day_dir
 from src.utils.ticker_aliases import get_canonical_alias_map
 from src.utils.ticker_context import ticker_context, negative_context
-from src.b_analysis.booster import Booster
-from src.b_analysis.sentiment_scorer import SentimentScorer
 
+# helper imports.
+from src.b_analysis.helpers.booster import Booster
+from src.b_analysis.helpers.sentiment_scorer import SentimentScorer
 
 class RedditProcessor(Booster):
 
     # --- self-initialize.
 
-    def __init__(self, input_file: Path):
+    def __init__(self, df: pd.DataFrame):
 
         # -- 1. get input file from phase 1.
-        self.input_file = input_file
+        self.df = df
 
         # -- 2. set up data from etfs and equities we want to reference.
         self.etf_universe = pd.read_csv(tickers_dir / "etfs.csv")

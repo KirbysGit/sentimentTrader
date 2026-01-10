@@ -26,7 +26,7 @@
 
 subreddits = ['wallstreetbets', 'investing', 'stocks', 'securityanalysis', 'valueinvesting', 'etfs', 'financialnews']
 sort_methods = ['new']
-lookback = 365
+lookback = 1
 num_posts = 300
 
 # comments ingestion (stage 1)

@@ -20,7 +20,7 @@ class SentimentScorer:
 
         # -- 1. select model based on subreddit.
         model_name = self.select_model(subreddit)
-
+        
         # -- 2. load pipeline.
         pipeline = self.get_pipeline(model_name)
 
@@ -33,7 +33,7 @@ class SentimentScorer:
                 
             if pipeline is None:
                 raise Exception(f"failed to load pipeline for model : {model_name}")
-        
+
 
         # -- 4. process text with pipeline.
         try:
@@ -142,12 +142,12 @@ class SentimentScorer:
             self.pipelines[model_name] = None
             return None
 
-        def select_device(self) -> int:
-            # keep it simple: use gpu if torch sees one, else cpu.
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    return 0
-            except Exception:
-                pass
-            return -1
+    def select_device(self) -> int:
+        # keep it simple: use gpu if torch sees one, else cpu.
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return 0
+        except Exception:
+            pass
+        return -1
