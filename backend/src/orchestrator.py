@@ -70,36 +70,38 @@ class PipelineOrchestrator:
     # stage 2 - process reddit data and set top tickers.
     def process_social_data(self, df: pd.DataFrame):
         try:
-            processed = self.reddit_processor.process(df=df)
+            # process reddit data.
+            processed = self.reddit_processor.process(df=df, run_id=self.run_id)
 
+            # check if processed data is valid.
             ok = processed is not None and not processed.empty
 
             if not ok:
                 print(f"{Fore.RED}stage 2 - no data found after processing 😡{Style.RESET_ALL}")
-                return None
+                return []
 
-            # -- 2. grab top tickers from daily metrics.
-            self.post_processing_tickers = grab_top_tickers(processed=processed)
+            # grab top tickers from daily metrics.
+            self.post_processing_tickers = grab_top_tickers(processed=processed, run_id=self.run_id)
 
             print(f"\n{Fore.CYAN}--- after processing, we have these tickers ---{Style.RESET_ALL}")
             print(set(self.post_processing_tickers))
 
-            return True
+            return self.post_processing_tickers or []
+        except Exception as e:
+            print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            return []
             
     # stage 3 - grab data from stocktwits on relevant tickers.
-    def source_features(self):
+    def source_features(self, tickers: List[str]):
         try:
-            tickers = self.post_processing_tickers or []
-            if tickers and self.raw_output_path:
-                stem = Path(self.raw_output_path).stem
-                msgs_path, daily_path = self.stocktwits_collector.collect_and_process(
-                    tickers=tickers,
-                    stem=stem,
-                    run_id=self.run_id,
-                )
-                self.stocktwits_messages_path = msgs_path
-                self.stocktwits_daily_path = daily_path
-                return True
+            msgs_path, daily_path = self.stocktwits_collector.collect_and_process(
+                tickers=tickers,
+                stem=stem,
+                run_id=self.run_id,
+            )
+            self.stocktwits_messages_path = msgs_path
+            self.stocktwits_daily_path = daily_path
+            return True
         except Exception as e:
             print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
@@ -182,7 +184,8 @@ def main():
         return
 
     # phase 2 : process reddit data.
-    if orchestrator.process_social_data(df=df):
+    tickers = orchestrator.process_social_data(df=df)
+    if tickers:
         print(f"{Fore.CYAN}=== ✓ stage 2 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")

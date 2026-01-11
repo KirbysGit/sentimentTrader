@@ -32,6 +32,7 @@ num_posts = 300
 # comments ingestion (stage 1)
 max_comments_per_post = 20
 max_comments_chars = 4000
+comment_weight = 3
 
 # stocktwits ingestion (optional)
 stocktwits_limit_per_ticker = 30
