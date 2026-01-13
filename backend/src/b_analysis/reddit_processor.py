@@ -37,6 +37,7 @@ class RedditProcessor(Booster):
         self.ticker_stops = 0
         self.tickers_boosted = 0
         self.posts_with_tickers = 0
+        self.raw_count = 0
 
         # -- 4. ticker processing info.
         self.agg_scores = defaultdict(int)
@@ -343,6 +344,9 @@ class RedditProcessor(Booster):
         #   title, text, link
 
         print(f"{Fore.CYAN}=== stage 2 : reddit data processing ==={Style.RESET_ALL}")
+
+        # taking a count of the raw data.
+        self.raw_count = 0 if df is None else len(df)
     
         # -- 1. iterate through the posts.
         for _, row in df.iterrows():
@@ -376,7 +380,7 @@ class RedditProcessor(Booster):
         tmp["created_date"] = tmp["created_at"].dt.date.astype(str)
         tmp["score"] = pd.to_numeric(tmp.get("score", 0), errors="coerce").fillna(0)
         tmp["num_comments"] = pd.to_numeric(tmp.get("num_comments", 0), errors="coerce").fillna(0)
-        tmp["engagement"] = tmp["score"] + tmp["num_comments"]
+        tmp["engagement"] = tmp["score"] + (tmp["num_comments"] * float(comment_weight))
 
         post_ticker_df = (
             tmp.groupby(["created_date", "post_id", "ticker"], as_index=False)
@@ -390,8 +394,59 @@ class RedditProcessor(Booster):
         )
         post_ticker_df["created_at"] = post_ticker_df["created_at"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-        # dataframe now looks like :
-        # - created_date, post_id, ticker, created_at, subreddit, engagement, boost_score, post_sentiment
+        # --- output 3: daily ticker table + historical master ---
+        
+        # -- set up the daily dataframe.
+        post_ticker_df["weighted_numer"] = post_ticker_df["post_sentiment"] * post_ticker_df["engagement"]
+        daily_df = (
+            post_ticker_df.groupby(["created_date", "ticker"], as_index=False)
+            .agg(
+                mention_count=("post_id", "nunique"),
+                total_engagement=("engagement", "sum"),
+                avg_sentiment=("post_sentiment", "mean"),
+                boost_score_sum=("boost_score", "sum"),
+                subreddit_diversity=("subreddit", "nunique"),
+                weighted_numer=("weighted_numer", "sum"),
+            )
+        )
+        
+        # -- calculate the weighted sentiment.
+        daily_df["weighted_sentiment"] = daily_df.apply(
+            lambda r: (r["weighted_numer"] / r["total_engagement"]) if r["total_engagement"] else 0.0,
+            axis=1,
+        )
+
+        # -- drop the weighted numer column.
+        daily_df = daily_df.drop(columns=["weighted_numer"], errors="ignore")
+
+        # -- rename the created_date column to date.
+        daily_df = daily_df.rename(columns={"created_date": "date"}).sort_values(["date", "ticker"]).reset_index(drop=True)
+
+        # -- update master daily table (append + dedupe by date,ticker)
+        master_path = processed_reddit_by_day_dir / "reddit_daily_all.csv"
+        
+        try:
+            # -- append to the master daily table if it exists.
+            if master_path.exists():
+                old = pd.read_csv(master_path)
+                combined_all = pd.concat([old, daily_df], ignore_index=True)
+            else:
+                combined_all = daily_df.copy()
+    
+            # -- convert the date and ticker columns to strings.
+            combined_all["date"] = combined_all["date"].astype(str)
+            combined_all["ticker"] = combined_all["ticker"].astype(str)
+            combined_all = (
+                combined_all.drop_duplicates(subset=["date", "ticker"], keep="last")
+                .sort_values(["date", "ticker"])
+                .reset_index(drop=True)
+            )
+
+            # -- save the master daily table.
+            combined_all.to_csv(master_path, index=False)
+        except Exception:
+            # non-fatal: don't break the pipeline if the master file is locked/corrupt
+            pass
 
         return post_ticker_df
 

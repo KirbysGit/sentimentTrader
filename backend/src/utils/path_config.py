@@ -29,6 +29,8 @@ raw_stocktwits_dir = raw_dir / "stocktwits"
 processed_reddit_by_day_dir = processed_dir / "reddit" / "by_day"
 processed_metrics_dir = processed_dir / "metrics"
 processed_stocktwits_by_day_dir = processed_dir / "stocktwits" / "by_day"
+processed_trends_by_day_dir = processed_dir / "trends" / "by_day"
+processed_stocks_by_day_dir = processed_dir / "stocks" / "by_day"
 
 # Note: Other directories (debug, references, models, tickers, results) 
 # are created on-demand when needed by the pipeline components
@@ -40,10 +42,9 @@ _REQUIRED_DIRECTORIES = [
     processed_dir,
     raw_reddit_dir,
     raw_stocks_dir,
-    raw_stocktwits_dir,
     processed_reddit_by_day_dir,
-    processed_metrics_dir,
-    processed_stocktwits_by_day_dir,
+    processed_trends_by_day_dir,
+    processed_stocks_by_day_dir,
 ]
 
 def _ensure_directories_exist():

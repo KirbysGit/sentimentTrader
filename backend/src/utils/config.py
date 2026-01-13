@@ -36,7 +36,6 @@ comment_weight = 3
 
 # stocktwits ingestion (optional)
 stocktwits_limit_per_ticker = 30
-stocktwits_score_sentiment = True
 
 # ============================================================================
 # stage 2: ticker analysis config
@@ -66,7 +65,7 @@ ticker_stop_terms = {
     "roi", "ip", "lego", "usd", "nswa", "wsbf", "for", "by", "as", "yolo", "dd", "eu", "ap", "mit", 
     "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic", "leap",
     "pc", "id", "cs", "you", "ice", "hhs", "oz", "nov", "arr", "nyc", "tlh", "usa", "aaa", "aa", "zt",
-    "xyz",
+    "op", "xyz",
 }
 
 popular_tickers = {

@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 # imports.
 import pandas as pd
 from typing import List
 from colorama import Fore, Style
-from __future__ import annotations
 
 # local imports.
 from src.utils.path_config import processed_reddit_by_day_dir
@@ -45,7 +46,7 @@ def grab_top_tickers(processed: pd.DataFrame, run_id: str) -> List[str]:
     processed_reddit_by_day_dir.mkdir(parents=True, exist_ok=True)
     watchlist_path = processed_reddit_by_day_dir / f"watchlist_{run_id}.csv"
     top.to_csv(watchlist_path, index=False)
-    print(f"{Fore.CYAN}saved stage 3 watchlist to {Style.RESET_ALL}{watchlist_path.name}")
+    print(f"{Fore.CYAN}saved watchlist to {Style.RESET_ALL}{watchlist_path.name}")
 
     # -- 8. return top tickers.
     return top["ticker"].dropna().astype(str).tolist()

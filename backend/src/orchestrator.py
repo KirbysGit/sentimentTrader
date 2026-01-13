@@ -2,9 +2,11 @@
 import os
 import sys
 import logging
+import pandas as pd
+from typing import List
 from pathlib import Path
-from datetime import datetime, timezone
 from colorama import Fore, Style
+from datetime import datetime, timezone
 
 
 # ensure backend is importable.
@@ -14,11 +16,12 @@ sys.path.insert(0, str(backend_dir))
 
 # pipeline stage imports.
 from src.a_social.reddit_collector import RedditCollector
-from src.a_social.stocktwits_collector import StocktwitsCollector
 from src.b_analysis.reddit_processor import RedditProcessor
-from src.c_stocks.stock_collector import StockCollector
-from src.d_merge.feature_builder import FeatureBuilder
-from src.e_train.train_baseline import train_baseline
+# from src.c_features.stocktwits_collector import StocktwitsCollector
+from src.c_features.google_trends_collector import GoogleTrendsCollector
+from src.d_stocks.stock_collector import StockCollector
+from src.e_merge.feature_builder import FeatureBuilder
+# from src.f_train.train_baseline import train_baseline
 
 # util imports.
 from src.utils.ticker_selection import grab_top_tickers
@@ -46,17 +49,14 @@ class PipelineOrchestrator:
         self.post_processing_tickers = []
 
         # -- 3. stocktwits collector. (feature sourcer)
-        self.stocktwits_collector = StocktwitsCollector()
         self.stocktwits_messages_path = None
         self.stocktwits_daily_path = None
+        self.trends_collector = GoogleTrendsCollector()
+        self.trends_daily_path = None
 
         # -- 4. stock collector (single instance).
         self.stock_collector = StockCollector()
         self.stocks_by_ticker_dir = None
-
-        # -- 5. feature builder (single instance).
-        self.feature_builder = FeatureBuilder()
-        self.merged_features_path = None
             
     # stage 1 - reddit collection.
 
@@ -94,52 +94,48 @@ class PipelineOrchestrator:
     # stage 3 - grab data from stocktwits on relevant tickers.
     def source_features(self, tickers: List[str]):
         try:
-            msgs_path, daily_path = self.stocktwits_collector.collect_and_process(
-                tickers=tickers,
-                stem=stem,
-                run_id=self.run_id,
-            )
-            self.stocktwits_messages_path = msgs_path
-            self.stocktwits_daily_path = daily_path
-            return True
-        except Exception as e:
-            print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
-            return False
-
-    # stage 3 - collecting relevant stock data.
-    def collect_stock_data(self):
-        try:
-            tickers = self.stage3_tickers or []
-            if not tickers:
-                print(f"{Fore.RED}stage 3 - no tickers selected (watchlist empty).{Style.RESET_ALL}")
-                return False
-
-            out_dir = self.stock_collector.collect_stock_data(tickers=tickers)
-            self.stocks_by_ticker_dir = out_dir
-            print(f"{Fore.CYAN}stage 3 - wrote per-ticker stock files to: {Style.RESET_ALL}{out_dir}")
+            # -- 1. collect the google trends.
+            res = self.trends_collector.collect(tickers=tickers, run_id=self.run_id)
+            if res.ok and res.path and res.rows > 0:
+                self.trends_daily_path = Path(res.path)
+                print(
+                    f"{Fore.CYAN}stage 3 - saved google trends to {Style.RESET_ALL}{Path(res.path).name} "
+                    f"{Fore.CYAN}({res.rows} rows){Style.RESET_ALL}"
+                )
+            else:
+                detail = res.error or "unknown"
+                print(f"{Fore.YELLOW}stage 3 - google trends empty/skipped: {detail}{Style.RESET_ALL}")
             return True
         except Exception as e:
             print(f"{Fore.RED}stage 3 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
 
-    # stage 4 - merge reddit daily metrics + stock OHLCV into one training dataset.
+    # stage 4 - collecting relevant stock data.
+    def collect_stock_data(self, tickers: List[str]):
+        try:
+            out_dir = self.stock_collector.collect_stock_data(tickers=tickers, run_id=self.run_id)
+            self.stocks_by_ticker_dir = out_dir
+            print(f"{Fore.CYAN}stage 4 - wrote per-ticker stock files to: {Style.RESET_ALL}{out_dir}")
+            return True
+        except Exception as e:
+            print(f"{Fore.RED}stage 4 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            return False
+
+    """
+    # stage 5 - merge reddit daily metrics + stock OHLCV into one training dataset.
     def build_features(self):
         try:
-            if not self.raw_output_path:
-                print(f"{Fore.RED}stage 4 - missing raw_output_path.{Style.RESET_ALL}")
-                return False
-
             # check if stocks_by_ticker_dir is set.
             stocks_dir = self.stocks_by_ticker_dir
             if not stocks_dir:
-                print(f"{Fore.RED}stage 4 - missing stocks_by_ticker_dir (run stage 3 first).{Style.RESET_ALL}")
+                print(f"{Fore.RED}stage 5 - missing stocks_by_ticker_dir (run stage 4 first).{Style.RESET_ALL}")
                 return False
 
             # build the features.
             out_path = self.feature_builder.build_dataset(
                 raw_output_path=Path(self.raw_output_path),
                 stocks_by_ticker_dir=Path(stocks_dir),
-                tickers=self.stage3_tickers,
+                tickers=self.post_processing_tickers,
             )
 
             # set the merged features path.
@@ -154,7 +150,7 @@ class PipelineOrchestrator:
             print(f"{Fore.RED}stage 4 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
 
-    # stage 5 - baseline training.
+    # stage 6 - baseline training.
     def train_model(self):
         try:
             p = self.merged_features_path
@@ -166,7 +162,7 @@ class PipelineOrchestrator:
         except Exception as e:
             print(f"{Fore.RED}stage 5 - uh oh 🚨 : {e} {Style.RESET_ALL}")
             return False
-
+    """
 
 # ------------------------------------------------------------
 # CLI entrypoint
@@ -175,8 +171,8 @@ def main():
     orchestrator = PipelineOrchestrator()
 
     # phase 1 : collect reddit.
-    if orchestrator.collect_reddit_data():
-        df = orchestrator.reddit_collector.fetch_data()
+    df = orchestrator.collect_reddit_data()
+    if df is not None and not df.empty:
         print(f"{Fore.CYAN}=== ✓ stage 1 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.YELLOW}=== no new reddit data collected. stopping pipeline (try again later). ===\n\n{Style.RESET_ALL}")
@@ -191,33 +187,44 @@ def main():
         print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")
         return
     
-    # phase 3 : source features from stocktwits.
-    if orchestrator.source_features():
+    # phase 3 : source features.
+    if orchestrator.source_features(tickers=tickers):
         print(f"{Fore.CYAN}=== ✓ stage 3 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}=== ✗ stage 3 failed! ===\n{Style.RESET_ALL}")
         return
 
     # phase 4 : collect stock data.
-    if orchestrator.collect_stock_data():
-        print(f"{Fore.GREEN}=== ✓ stage 3 done! ===\n{Style.RESET_ALL}")
+    if orchestrator.collect_stock_data(tickers=tickers):
+        print(f"{Fore.CYAN}=== ✓ stage 4 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 3 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== ✗ stage 4 failed! ===\n{Style.RESET_ALL}")
         return
 
-    # phase 4 : build merged features.
+    return
+
+    # for right now, we are in the data accumulation phase.
+    # because we got kind of limited on our data sources from the past,
+    # our best option is just to build and aggregate as time goes then
+    # begin training once we have a good amount of data.
+
+    """
+
+    # phase 5 : build merged features.
     if orchestrator.build_features():
         print(f"{Fore.GREEN}=== ✓ stage 4 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}=== ✗ stage 4 failed! ===\n{Style.RESET_ALL}")
         return
 
-    # phase 5 : baseline training.
+    # phase 6 : baseline training.
     if orchestrator.train_model():
         print(f"{Fore.GREEN}=== ✓ stage 5 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}=== ✗ stage 5 failed! ===\n{Style.RESET_ALL}")
         return
+
+    """
 
 if __name__ == "__main__":
     main() 

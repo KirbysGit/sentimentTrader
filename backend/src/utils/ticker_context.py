@@ -129,7 +129,7 @@ ticker_context = {
     "WBD": ["warner", "discovery", "hbo", "max", "netflix", "studio deal", "streaming", "content distribution"],
     "WSR": ["whitestone reit", "shopping centers", "retail reit", "houston", "phoenix"],
     "WRBY": ["warby parker", "eyeglasses", "eyewear", "direct to consumer", "vision care"],
-    "DRIP": ["direxion", "oil", "etf" "oil futures"],
+    "DRIP": ["direxion", "oil", "etf", "oil futures"],
     "TLN": ["talen energy corp", "natural gas", "pipeline", "power generation", "utility"],
     "RSI": ["rush street interactive", "gambling", "casino", "sports betting", "online gaming", "bet rivers", "rush bet", "rushbet.co", "sugarhouse"],
     "HLX": ["helix energy solutions group", "energy", "oil", "gas", "pipeline", "power generation", "utility"],
@@ -219,6 +219,7 @@ ticker_context = {
 }   
 
 negative_context = {
+    "OP": ["like op", "dear op"],
     "TIMB": ["dr tim", "tim holme", "tim cook", "named tim"],
     "LOT": ["lot of", "a lot of", "a lot", "parking lot", "lots of data"],
     "AMZN": ["amazing", "amazon rainforest", "jungle", "river amazon", "amazon prime day deals", "prime shipping", "online shopping", "buy on amazon", "ordered on amazon", "package delivery"],
@@ -257,7 +258,7 @@ negative_context = {
     "CD": ["certificate of deposit", "cd account", "cd accounts", "savings", "interest rate", "apy", "bank", "fdic", "ira", "in a cd"],
     "HYS": ["high yield savings", "hys account", "savings account", "apy", "interest rate", "bank", "cit", "fdic", "direct deposit"],
     "CIT": ["cit bank", "savings account", "high yield savings", "hys", "apy", "interest rate", "fdic", "online bank", "direct deposit"],
-    "SOL": ["shit out of luck", "out of luck", "am i sol?" "am i sol", "would i be sol?", "would i be sol"],
+    "SOL": ["shit out of luck", "out of luck", "am i sol?", "am i sol", "would i be sol?", "would i be sol"],
     "ACH": ["ach transfer", "ach payment", "ach trace", "trace number", "bank transfer", "routing number", "account number", "left my bank"],
     "OCC": ["office of the comptroller", "comptroller of the currency", "bank regulator", "regulatory complaint", "filed a complaint", "bbb", "ftc", "attorney general"],
     "EDIT": ["edit -", "edit:"],

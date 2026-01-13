@@ -260,6 +260,13 @@ class RedditCollector:
         # -- 5. set up run name and output path.
         filename = f"reddit_posts_{self.run_id}.csv"
         output_path = self.data_dir / filename
+
+        # -- 6. create the directory if it doesn't exist.
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
         final.to_csv(output_path, index=False)
 
         print(f"we got {Fore.GREEN}{len(final)}{Style.RESET_ALL} total posts from our original {Fore.YELLOW}{pre_clean}{Style.RESET_ALL} posts")

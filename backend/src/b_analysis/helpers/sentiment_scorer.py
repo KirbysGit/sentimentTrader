@@ -6,6 +6,18 @@ from src.utils.config import subreddit_to_model_map, default_model
 class SentimentScorer:
 
     def __init__(self):
+        # silence noisy transformers startup logs/warnings
+        try:
+            import warnings
+            from transformers.utils import logging as hf_logging
+
+            hf_logging.set_verbosity_error()
+            # also suppress common warning spam from model init
+            warnings.filterwarnings("ignore", message="Some weights of the model checkpoint*")
+            warnings.filterwarnings("ignore", message="You seem to be using the pipelines sequentially on GPU*")
+        except Exception:
+            pass
+
         # -- 1. subreddit → model mapping.
         self.subreddit_models = subreddit_to_model_map
         self.default_model = default_model
