@@ -288,13 +288,20 @@ class RedditProcessor(Booster):
             return
 
         # -- 6.25 just add posts to our post lists for later reference.
+        # We also keep created_at and basic metrics so we can refresh engagement later (re-poll last N days).
         score = row.get("score", 0) or 0
         num_comments = row.get("num_comments", 0) or 0
         self.posts.append(
             {
                 "post_id": row.get("id"),
+                "created_at": row.get("created_at"),
+                "subreddit": row.get("subreddit", ""),
+                "score": score,
+                "num_comments": num_comments,
+                "upvote_ratio": row.get("upvote_ratio", 0.0),
                 "title": row.get("title", ""),
                 "text": row.get("text", ""),
+                "link": row.get("link", ""),
                 "engagement": score + (num_comments * comment_weight),
             }
         )
@@ -359,7 +366,7 @@ class RedditProcessor(Booster):
 
         # bunch of debugging info.
         print(f"top 10 ticker by total posts: {Fore.GREEN}{top_by_posts[:10]}{Style.RESET_ALL}")
-        print(f"posts with ≥1 kept tickers: {Fore.GREEN}{self.posts_with_tickers}{Style.RESET_ALL} / {Fore.YELLOW}{self.raw_count}{Style.RESET_ALL}")
+        print(f"posts with 1 or more kept tickers: {Fore.GREEN}{self.posts_with_tickers}{Style.RESET_ALL} / {Fore.YELLOW}{self.raw_count}{Style.RESET_ALL}")
         print(f"processed {Fore.GREEN}{self.tickers_extraction}{Style.RESET_ALL} tickers from {Fore.YELLOW}{self.posts_with_tickers}{Style.RESET_ALL} posts with tickers")
         print(f"kept {Fore.GREEN}{self.ticker_stops}{Style.RESET_ALL} tickers after stop-words filter from {Fore.YELLOW}{self.tickers_extraction}{Style.RESET_ALL} candidates")
         print(f"kept {Fore.GREEN}{self.tickers_boosted}{Style.RESET_ALL} tickers after boosting (score > 0) from {Fore.YELLOW}{self.ticker_stops}{Style.RESET_ALL} candidates")
@@ -369,6 +376,38 @@ class RedditProcessor(Booster):
         processed_reddit_by_day_dir.mkdir(parents=True, exist_ok=True)
         posts_path = processed_reddit_by_day_dir / f"posts_{run_id}.csv"
         self.posts_df.to_csv(posts_path, index=False)
+
+        # Update master posts table (append + dedupe by post_id, keeping highest engagement snapshot).
+        # This powers "refresh last N days" so daily aggregates can be corrected as posts gain traction.
+        posts_master_path = processed_reddit_by_day_dir / "posts_all.csv"
+        try:
+            if posts_master_path.exists():
+                old_posts = pd.read_csv(posts_master_path)
+                combined_posts = pd.concat([old_posts, self.posts_df], ignore_index=True)
+            else:
+                combined_posts = self.posts_df.copy()
+
+            # Normalize types + compute engagement defensively.
+            combined_posts["post_id"] = combined_posts.get("post_id", "").astype(str)
+            combined_posts["created_at"] = combined_posts.get("created_at", "").astype(str)
+            combined_posts["score"] = pd.to_numeric(combined_posts.get("score", 0), errors="coerce").fillna(0)
+            combined_posts["num_comments"] = pd.to_numeric(combined_posts.get("num_comments", 0), errors="coerce").fillna(0)
+            combined_posts["engagement"] = (
+                pd.to_numeric(combined_posts.get("engagement", 0), errors="coerce").fillna(0)
+            )
+            # Prefer recomputing engagement from score/comments if engagement is missing/zero.
+            recomputed = combined_posts["score"] + (combined_posts["num_comments"] * float(comment_weight))
+            combined_posts["engagement"] = combined_posts["engagement"].where(combined_posts["engagement"] > 0, recomputed)
+
+            # Keep the snapshot with the highest engagement for each post.
+            combined_posts = combined_posts.sort_values(["post_id", "engagement"]).drop_duplicates(
+                subset=["post_id"], keep="last"
+            )
+            combined_posts = combined_posts.reset_index(drop=True)
+            combined_posts.to_csv(posts_master_path, index=False)
+        except Exception:
+            # non-fatal
+            pass
 
         # --- output 2: quantitative df (post_id+ticker metrics) ---
         if not self.records:

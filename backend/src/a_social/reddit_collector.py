@@ -235,13 +235,13 @@ class RedditCollector:
                 # -- 1.3. if dataframe exists, add to our parent array.
                 if df is not None and not df.empty:
                     all_dfs.append(df)
-                    print(f"{Fore.GREEN}we got {len(df)} posts 🎉{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}we got {len(df)} posts {Style.RESET_ALL}")
                 else:
-                    print(f"{Fore.RED}we got no posts 😡 from r/{name}{Style.RESET_ALL}")
+                    print(f"{Fore.RED}we got no posts from r/{name}{Style.RESET_ALL}")
             print()
 
         if not all_dfs:
-            print(f"{Fore.RED}we got no posts 😡 from any subreddits{Style.RESET_ALL}")
+            print(f"{Fore.RED}we got no posts from any subreddits{Style.RESET_ALL}")
             return None
 
         # -- 2. grab pre-clean len.
@@ -272,3 +272,75 @@ class RedditCollector:
         print(f"we got {Fore.GREEN}{len(final)}{Style.RESET_ALL} total posts from our original {Fore.YELLOW}{pre_clean}{Style.RESET_ALL} posts")
         
         return final
+
+    # --- refresh window support ---
+    def refresh_recent_posts(self, days: int = 7) -> pd.DataFrame:
+        """
+        Re-fetch a rolling window of recent posts by post_id so we can update score/num_comments
+        (and therefore engagement) as posts become more popular over time.
+
+        Source of truth for which post_ids to refresh is the processed master table `posts_all.csv`.
+        This does NOT touch the incremental cursor (last_seen_created_utc).
+        """
+        try:
+            from src.utils.path_config import processed_reddit_by_day_dir
+        except Exception:
+            return pd.DataFrame()
+
+        master_posts_path = processed_reddit_by_day_dir / "posts_all.csv"
+        if not master_posts_path.exists():
+            return pd.DataFrame()
+
+        try:
+            old = pd.read_csv(master_posts_path)
+        except Exception:
+            return pd.DataFrame()
+
+        if old is None or old.empty:
+            return pd.DataFrame()
+
+        # Identify last N days by created_at (UTC).
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+        created = pd.to_datetime(old.get("created_at", None), utc=True, errors="coerce")
+        old = old.assign(_created_at=created)
+        old = old[old["_created_at"].notna() & (old["_created_at"] >= cutoff)]
+        if old.empty:
+            return pd.DataFrame()
+
+        post_ids = old.get("post_id", pd.Series([], dtype=str)).dropna().astype(str).unique().tolist()
+        if not post_ids:
+            return pd.DataFrame()
+
+        print(f"{Fore.CYAN}stage 1 - refreshing engagement for last {days} days ({len(post_ids)} posts){Style.RESET_ALL}")
+
+        refreshed = []
+        for pid in post_ids:
+            try:
+                post = self.reddit.submission(id=str(pid))
+                created_utc = float(getattr(post, "created_utc", 0.0) or 0.0)
+                refreshed.append(
+                    {
+                        "created_at": datetime.fromtimestamp(created_utc, tz=timezone.utc).isoformat() if created_utc else "",
+                        "id": post.id,
+                        "subreddit": str(getattr(post, "subreddit", "") or ""),
+                        "flair": (getattr(post, "link_flair_text", "") or "").strip().lower(),
+                        "score": getattr(post, "score", 0),
+                        "upvote_ratio": getattr(post, "upvote_ratio", 0.0),
+                        "num_comments": getattr(post, "num_comments", 0),
+                        "title": getattr(post, "title", "") or "",
+                        "text": getattr(post, "selftext", "") or "",
+                        # comments_text intentionally omitted on refresh (expensive + not needed for aggregates)
+                        "comments_text": "",
+                        "link": f"https://www.reddit.com{getattr(post, 'permalink', '')}",
+                    }
+                )
+            except Exception:
+                continue
+
+        df = pd.DataFrame(refreshed)
+        if df.empty:
+            return df
+
+        # Deduplicate by id (keep last).
+        df = df.drop_duplicates(subset=["id"], keep="last")
+        return df

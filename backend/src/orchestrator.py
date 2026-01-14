@@ -25,6 +25,7 @@ from src.e_merge.feature_builder import FeatureBuilder
 
 # util imports.
 from src.utils.ticker_selection import grab_top_tickers
+from src.utils.config import comment_weight
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class PipelineOrchestrator:
     # --- self-initialize.
 
     def __init__(self):
-        print(f"{Fore.CYAN}=== pipeline 🤓 is ready!===\n{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== pipeline is ready! ===\n{Style.RESET_ALL}")
 
         # -- pre-run start data.
         self.run_ts = datetime.now(timezone.utc)
@@ -64,7 +65,7 @@ class PipelineOrchestrator:
         try:
             return self.reddit_collector.fetch_data()
         except Exception as e:
-            print(f"{Fore.RED}stage 1 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 1 - uh oh : {e} {Style.RESET_ALL}")
             return None
 
     # stage 2 - process reddit data and set top tickers.
@@ -77,7 +78,7 @@ class PipelineOrchestrator:
             ok = processed is not None and not processed.empty
 
             if not ok:
-                print(f"{Fore.RED}stage 2 - no data found after processing 😡{Style.RESET_ALL}")
+                print(f"{Fore.RED}stage 2 - no data found after processing {Style.RESET_ALL}")
                 return []
 
             # grab top tickers from daily metrics.
@@ -88,7 +89,7 @@ class PipelineOrchestrator:
 
             return self.post_processing_tickers or []
         except Exception as e:
-            print(f"{Fore.RED}stage 2 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 2 - uh oh : {e} {Style.RESET_ALL}")
             return []
             
     # stage 3 - grab data from stocktwits on relevant tickers.
@@ -107,7 +108,7 @@ class PipelineOrchestrator:
                 print(f"{Fore.YELLOW}stage 3 - google trends empty/skipped: {detail}{Style.RESET_ALL}")
             return True
         except Exception as e:
-            print(f"{Fore.RED}stage 3 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 3 - uh oh : {e} {Style.RESET_ALL}")
             return False
 
     # stage 4 - collecting relevant stock data.
@@ -118,7 +119,7 @@ class PipelineOrchestrator:
             print(f"{Fore.CYAN}stage 4 - wrote per-ticker stock files to: {Style.RESET_ALL}{out_dir}")
             return True
         except Exception as e:
-            print(f"{Fore.RED}stage 4 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 4 - uh oh : {e} {Style.RESET_ALL}")
             return False
 
     """
@@ -147,7 +148,7 @@ class PipelineOrchestrator:
             # return the result.
             return bool(ok)
         except Exception as e:
-            print(f"{Fore.RED}stage 4 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 4 - uh oh : {e} {Style.RESET_ALL}")
             return False
 
     # stage 6 - baseline training.
@@ -160,7 +161,7 @@ class PipelineOrchestrator:
             result = train_baseline(Path(p))
             return bool(result.ok and result.report_path.exists())
         except Exception as e:
-            print(f"{Fore.RED}stage 5 - uh oh 🚨 : {e} {Style.RESET_ALL}")
+            print(f"{Fore.RED}stage 5 - uh oh : {e} {Style.RESET_ALL}")
             return False
     """
 
@@ -171,34 +172,53 @@ def main():
     orchestrator = PipelineOrchestrator()
 
     # phase 1 : collect reddit.
-    df = orchestrator.collect_reddit_data()
+    df_new = orchestrator.collect_reddit_data()
+    df_refresh = orchestrator.reddit_collector.refresh_recent_posts(days=7)
+
+    # Combine "new" + "refreshed" and keep the snapshot with the highest engagement per post id.
+    frames = [x for x in [df_new, df_refresh] if x is not None and not x.empty]
+    df = pd.concat(frames, ignore_index=True) if frames else None
     if df is not None and not df.empty:
-        print(f"{Fore.CYAN}=== ✓ stage 1 done! ===\n{Style.RESET_ALL}")
+        try:
+            df["score"] = pd.to_numeric(df.get("score", 0), errors="coerce").fillna(0)
+            df["num_comments"] = pd.to_numeric(df.get("num_comments", 0), errors="coerce").fillna(0)
+            df["_engagement"] = df["score"] + (df["num_comments"] * float(comment_weight))
+            # Keep highest engagement per post id
+            df = (
+                df.sort_values(["id", "_engagement"])
+                .drop_duplicates(subset=["id"], keep="last")
+                .drop(columns=["_engagement"], errors="ignore")
+                .reset_index(drop=True)
+            )
+        except Exception:
+            pass
+
+        print(f"{Fore.CYAN}=== OK stage 1 done! ===\n{Style.RESET_ALL}")
     else:
         print(f"{Fore.YELLOW}=== no new reddit data collected. stopping pipeline (try again later). ===\n\n{Style.RESET_ALL}")
-        print(f"{Fore.RED}=== ✗ stage 1 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 1 failed! ===\n{Style.RESET_ALL}")
         return
 
     # phase 2 : process reddit data.
     tickers = orchestrator.process_social_data(df=df)
     if tickers:
-        print(f"{Fore.CYAN}=== ✓ stage 2 done! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== OK stage 2 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 2 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 2 failed! ===\n{Style.RESET_ALL}")
         return
     
     # phase 3 : source features.
     if orchestrator.source_features(tickers=tickers):
-        print(f"{Fore.CYAN}=== ✓ stage 3 done! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== OK stage 3 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 3 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 3 failed! ===\n{Style.RESET_ALL}")
         return
 
     # phase 4 : collect stock data.
     if orchestrator.collect_stock_data(tickers=tickers):
-        print(f"{Fore.CYAN}=== ✓ stage 4 done! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}=== OK stage 4 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 4 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 4 failed! ===\n{Style.RESET_ALL}")
         return
 
     return
@@ -212,16 +232,16 @@ def main():
 
     # phase 5 : build merged features.
     if orchestrator.build_features():
-        print(f"{Fore.GREEN}=== ✓ stage 4 done! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}=== OK stage 4 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 4 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 4 failed! ===\n{Style.RESET_ALL}")
         return
 
     # phase 6 : baseline training.
     if orchestrator.train_model():
-        print(f"{Fore.GREEN}=== ✓ stage 5 done! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}=== OK stage 5 done! ===\n{Style.RESET_ALL}")
     else:
-        print(f"{Fore.RED}=== ✗ stage 5 failed! ===\n{Style.RESET_ALL}")
+        print(f"{Fore.RED}=== FAIL stage 5 failed! ===\n{Style.RESET_ALL}")
         return
 
     """
