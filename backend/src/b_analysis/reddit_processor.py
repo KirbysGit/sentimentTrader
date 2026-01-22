@@ -351,7 +351,7 @@ class RedditProcessor(Booster):
         #   title, text, link
 
         print(f"{Fore.CYAN}=== stage 2 : reddit data processing ==={Style.RESET_ALL}")
-
+    
         # taking a count of the raw data.
         self.raw_count = 0 if df is None else len(df)
     
@@ -415,45 +415,45 @@ class RedditProcessor(Booster):
 
         mention_df = pd.DataFrame(self.records)
         tmp = mention_df.copy()
-        tmp["created_at"] = pd.to_datetime(tmp["created_at"], utc=True, errors="coerce")
-        tmp["created_date"] = tmp["created_at"].dt.date.astype(str)
+            tmp["created_at"] = pd.to_datetime(tmp["created_at"], utc=True, errors="coerce")
+            tmp["created_date"] = tmp["created_at"].dt.date.astype(str)
         tmp["score"] = pd.to_numeric(tmp.get("score", 0), errors="coerce").fillna(0)
         tmp["num_comments"] = pd.to_numeric(tmp.get("num_comments", 0), errors="coerce").fillna(0)
         tmp["engagement"] = tmp["score"] + (tmp["num_comments"] * float(comment_weight))
 
-        post_ticker_df = (
-            tmp.groupby(["created_date", "post_id", "ticker"], as_index=False)
-            .agg(
-                created_at=("created_at", "min"),
-                subreddit=("subreddit", "first"),
-                engagement=("engagement", "max"),
-                boost_score=("boost_score", "max"),
-                post_sentiment=("sentiment_score", "mean"),
+            post_ticker_df = (
+                tmp.groupby(["created_date", "post_id", "ticker"], as_index=False)
+                .agg(
+                    created_at=("created_at", "min"),
+                    subreddit=("subreddit", "first"),
+                    engagement=("engagement", "max"),
+                    boost_score=("boost_score", "max"),
+                    post_sentiment=("sentiment_score", "mean"),
+                )
             )
-        )
-        post_ticker_df["created_at"] = post_ticker_df["created_at"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+            post_ticker_df["created_at"] = post_ticker_df["created_at"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
 
         # --- output 3: daily ticker table + historical master ---
         
         # -- set up the daily dataframe.
-        post_ticker_df["weighted_numer"] = post_ticker_df["post_sentiment"] * post_ticker_df["engagement"]
-        daily_df = (
-            post_ticker_df.groupby(["created_date", "ticker"], as_index=False)
-            .agg(
-                mention_count=("post_id", "nunique"),
+            post_ticker_df["weighted_numer"] = post_ticker_df["post_sentiment"] * post_ticker_df["engagement"]
+            daily_df = (
+                post_ticker_df.groupby(["created_date", "ticker"], as_index=False)
+                .agg(
+                    mention_count=("post_id", "nunique"),
                 total_engagement=("engagement", "sum"),
-                avg_sentiment=("post_sentiment", "mean"),
-                boost_score_sum=("boost_score", "sum"),
-                subreddit_diversity=("subreddit", "nunique"),
+                    avg_sentiment=("post_sentiment", "mean"),
+                    boost_score_sum=("boost_score", "sum"),
+                    subreddit_diversity=("subreddit", "nunique"),
                 weighted_numer=("weighted_numer", "sum"),
             )
         )
         
         # -- calculate the weighted sentiment.
-        daily_df["weighted_sentiment"] = daily_df.apply(
-            lambda r: (r["weighted_numer"] / r["total_engagement"]) if r["total_engagement"] else 0.0,
-            axis=1,
-        )
+            daily_df["weighted_sentiment"] = daily_df.apply(
+                lambda r: (r["weighted_numer"] / r["total_engagement"]) if r["total_engagement"] else 0.0,
+                axis=1,
+            )
 
         # -- drop the weighted numer column.
         daily_df = daily_df.drop(columns=["weighted_numer"], errors="ignore")

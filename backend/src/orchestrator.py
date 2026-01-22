@@ -43,7 +43,7 @@ class PipelineOrchestrator:
         self.run_id = self.run_ts.strftime("%Y%m%d_%H%M%S")
 
         # -- 1. reddit collector.
-        self.reddit_collector = RedditCollector(run_date=self.run_date, run_id=self.run_id)                                    
+        self.reddit_collector = RedditCollector(run_date=self.run_date, run_id=self.run_id)
 
         # -- 2. reddit processor.
         self.reddit_processor = RedditProcessor()
@@ -110,7 +110,7 @@ class PipelineOrchestrator:
         except Exception as e:
             print(f"{Fore.RED}stage 3 - uh oh : {e} {Style.RESET_ALL}")
             return False
-
+            
     # stage 4 - collecting relevant stock data.
     def collect_stock_data(self, tickers: List[str]):
         try:
