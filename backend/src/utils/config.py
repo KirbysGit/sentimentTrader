@@ -49,7 +49,7 @@ time_tokens = { "AM", "PM", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PD
 
 ambiguous = {
     "ON", "OR", "IT", "TGT", "ALL", "ONE", "UP", "NOW", "ANY", "TISI", "EDIT", "TILE", "NICE", "EVER", 
-    "SHOP", "HBM", "DBX", "AWRE",
+    "SHOP", "HBM", "DBX", "AWRE", "ATH",
 }
 
 us_states = {
@@ -65,7 +65,7 @@ ticker_stop_terms = {
     "roi", "ip", "lego", "usd", "nswa", "wsbf", "for", "by", "as", "yolo", "dd", "eu", "ap", "mit", 
     "nav", "line", "un", "iii", "irs", "thc", "best", "vieww", "uk", "eu", "gbp", "roic", "leap",
     "pc", "id", "cs", "you", "ice", "hhs", "oz", "nov", "arr", "nyc", "tlh", "usa", "aaa", "aa", "zt",
-    "op", "xyz",
+    "op", "xyz", "ath",
 }
 
 popular_tickers = {
