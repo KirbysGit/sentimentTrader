@@ -20,12 +20,14 @@ from src.b_analysis.reddit_processor import RedditProcessor
 # from src.c_features.stocktwits_collector import StocktwitsCollector
 from src.c_features.google_trends_collector import GoogleTrendsCollector
 from src.d_stocks.stock_collector import StockCollector
-from src.e_merge.feature_builder import FeatureBuilder
+# Daily run: accumulation only (reddit → metrics → trends → OHLCV). Merge + train: scripts/pipeline or run manually.
+# from src.e_merge.feature_builder import FeatureBuilder
 # from src.f_train.train_baseline import train_baseline
 
 # util imports.
 from src.utils.ticker_selection import grab_top_tickers
 from src.utils.config import comment_weight
+# from src.utils.config import run_baseline_training_after_merge
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,11 @@ class PipelineOrchestrator:
         # -- 4. stock collector (single instance).
         self.stock_collector = StockCollector()
         self.stocks_by_ticker_dir = None
-            
+
+        # -- 5. merge + train (disabled for daily cron; see scripts/pipeline/run_pipeline_tail.py + train_baseline).
+        # self.feature_builder = FeatureBuilder()
+        # self.merged_features_path = None
+
     # stage 1 - reddit collection.
 
     def collect_reddit_data(self):
@@ -122,48 +128,45 @@ class PipelineOrchestrator:
             print(f"{Fore.RED}stage 4 - uh oh : {e} {Style.RESET_ALL}")
             return False
 
-    """
-    # stage 5 - merge reddit daily metrics + stock OHLCV into one training dataset.
-    def build_features(self):
-        try:
-            # check if stocks_by_ticker_dir is set.
-            stocks_dir = self.stocks_by_ticker_dir
-            if not stocks_dir:
-                print(f"{Fore.RED}stage 5 - missing stocks_by_ticker_dir (run stage 4 first).{Style.RESET_ALL}")
-                return False
-
-            # build the features.
-            out_path = self.feature_builder.build_dataset(
-                raw_output_path=Path(self.raw_output_path),
-                stocks_by_ticker_dir=Path(stocks_dir),
-                tickers=self.post_processing_tickers,
-            )
-
-            # set the merged features path.
-            self.merged_features_path = out_path
-
-            # check if the merged features path exists.
-            ok = out_path is not None and out_path.exists()
-
-            # return the result.
-            return bool(ok)
-        except Exception as e:
-            print(f"{Fore.RED}stage 4 - uh oh : {e} {Style.RESET_ALL}")
-            return False
-
-    # stage 6 - baseline training.
-    def train_model(self):
-        try:
-            p = self.merged_features_path
-            if not p:
-                print(f"{Fore.RED}stage 5 - missing merged_features_path (run stage 4 first).{Style.RESET_ALL}")
-                return False
-            result = train_baseline(Path(p))
-            return bool(result.ok and result.report_path.exists())
-        except Exception as e:
-            print(f"{Fore.RED}stage 5 - uh oh : {e} {Style.RESET_ALL}")
-            return False
-    """
+    # # stage 5 - merge reddit daily master + per-ticker OHLCV into training features.
+    # def build_features(self, tickers: Optional[List[str]] = None):
+    #     try:
+    #         stocks_dir = self.stocks_by_ticker_dir
+    #         if not stocks_dir:
+    #             print(f"{Fore.RED}stage 5 - missing stocks_by_ticker_dir (run stage 4 first).{Style.RESET_ALL}")
+    #             return False
+    #
+    #         # tickers=None builds rows for every symbol that appears in reddit_daily_all and has raw_{t}.csv.
+    #         out_path = self.feature_builder.build_dataset(
+    #             stocks_by_ticker_dir=Path(stocks_dir),
+    #             run_id=self.run_id,
+    #             tickers=tickers,
+    #         )
+    #         self.merged_features_path = out_path
+    #         ok = out_path is not None and out_path.exists()
+    #         return bool(ok)
+    #     except Exception as e:
+    #         print(f"{Fore.RED}stage 5 - uh oh : {e} {Style.RESET_ALL}")
+    #         return False
+    #
+    # # stage 6 - baseline training (logistic regression on merged_features_all.csv).
+    # def train_model(self):
+    #     try:
+    #         p = self.merged_features_path
+    #         if not p or not Path(p).exists():
+    #             print(f"{Fore.RED}stage 6 - missing merged_features_path (run stage 5 first).{Style.RESET_ALL}")
+    #             return False
+    #         check = pd.read_csv(p)
+    #         if check.empty or len(check) < 20:
+    #             print(
+    #                 f"{Fore.YELLOW}stage 6 - skip training: merged file has {len(check)} rows (need >= 20).{Style.RESET_ALL}"
+    #             )
+    #             return False
+    #         result = train_baseline(Path(p))
+    #         return bool(result.ok and result.report_path.exists())
+    #     except Exception as e:
+    #         print(f"{Fore.RED}stage 6 - uh oh : {e} {Style.RESET_ALL}")
+    #         return False
 
 # ------------------------------------------------------------
 # CLI entrypoint
@@ -221,30 +224,20 @@ def main():
         print(f"{Fore.RED}=== FAIL stage 4 failed! ===\n{Style.RESET_ALL}")
         return
 
-    return
+    # # phase 5–6 : merge + baseline train — run on demand: `python scripts/pipeline/run_pipeline_tail.py` (and train if desired).
+    # if orchestrator.build_features(tickers=None):
+    #     print(f"{Fore.GREEN}=== OK stage 5 done! ===\n{Style.RESET_ALL}")
+    # else:
+    #     print(f"{Fore.RED}=== FAIL stage 5 failed! ===\n{Style.RESET_ALL}")
+    #     return
+    #
+    # if run_baseline_training_after_merge:
+    #     if orchestrator.train_model():
+    #         print(f"{Fore.GREEN}=== OK stage 6 done! ===\n{Style.RESET_ALL}")
+    #     else:
+    #         print(f"{Fore.YELLOW}=== stage 6 skipped or failed (see logs above) ===\n{Style.RESET_ALL}")
 
-    # for right now, we are in the data accumulation phase.
-    # because we got kind of limited on our data sources from the past,
-    # our best option is just to build and aggregate as time goes then
-    # begin training once we have a good amount of data.
-
-    """
-
-    # phase 5 : build merged features.
-    if orchestrator.build_features():
-        print(f"{Fore.GREEN}=== OK stage 4 done! ===\n{Style.RESET_ALL}")
-    else:
-        print(f"{Fore.RED}=== FAIL stage 4 failed! ===\n{Style.RESET_ALL}")
-        return
-
-    # phase 6 : baseline training.
-    if orchestrator.train_model():
-        print(f"{Fore.GREEN}=== OK stage 5 done! ===\n{Style.RESET_ALL}")
-    else:
-        print(f"{Fore.RED}=== FAIL stage 5 failed! ===\n{Style.RESET_ALL}")
-        return
-
-    """
+    print(f"{Fore.GREEN}=== daily accumulation complete (stages 1–4). ===\n{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     main() 

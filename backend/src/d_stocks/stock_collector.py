@@ -13,7 +13,13 @@ from src.utils.config import lookback_days, topN
 
 class StockCollector:
 
-    def collect_stock_data(self, tickers: List[str], run_id: str | None = None) -> Path:
+    def collect_stock_data(
+        self,
+        tickers: List[str],
+        run_id: str | None = None,
+        *,
+        apply_topn_limit: bool = True,
+    ) -> Path:
         
         print(f"{Fore.CYAN}=== stage 4 : stock data collection ==={Style.RESET_ALL}")
 
@@ -23,7 +29,9 @@ class StockCollector:
         by_ticker_dir.mkdir(parents=True, exist_ok=True)
 
         # -- 2. normalize tickers and write "ready-to-fetch" list.
-        tickers = tickers[:topN]
+        tickers = list(tickers)
+        if apply_topn_limit:
+            tickers = tickers[:topN]
 
         # -- 3. fetch daily OHLCV (simple yfinance v0).
         rows = []

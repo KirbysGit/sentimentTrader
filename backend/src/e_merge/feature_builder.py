@@ -12,46 +12,75 @@ from src.utils.path_config import processed_reddit_by_day_dir, processed_metrics
 
 class FeatureBuilder:
     """
-    Stage 4 (merge + features): join daily reddit metrics with daily OHLCV, then build
+    Stage 5 (merge + features): join daily reddit metrics with daily OHLCV, then build
     a minimal feature set + next-day label for training.
+
+    Sentiment source is ``reddit_daily_all.csv`` (master from reddit_processor). Tickers
+    are restricted to those with ``raw_{TICKER}.csv`` under ``stocks_by_ticker_dir`` so
+    each run rebuilds the full merge from accumulated Reddit + all stock files on disk.
 
     Output shape (one row per ticker-date):
       - keys: ticker, date
-      - reddit daily metrics columns (as-is)
-      - ohlcv columns (open/high/low/close/adj_close/volume)
-      - features: minimal sentiment + price context (no lookahead)
-      - labels: next_close, y_ret_1d
+      - features: sentiment, buzz, chg, lags/rolls (milestone B), had_reddit, close_ret_3d
+      - label: y_ret_1d
     """
 
-    def build_dataset(self, raw_output_path: Path, stocks_by_ticker_dir: Path, tickers: Optional[List[str]] = None) -> Path:
+    def build_dataset(
+        self,
+        stocks_by_ticker_dir: Path,
+        run_id: str,
+        tickers: Optional[List[str]] = None,
+    ) -> Path:
 
         # create directory for merged features.
         processed_metrics_dir.mkdir(parents=True, exist_ok=True)
 
-        # load reddit daily metrics.
-        stem = Path(raw_output_path).stem
-        reddit_daily_path = processed_reddit_by_day_dir / f"reddit_ticker_daily_{stem}.csv"
+        reddit_daily_path = processed_reddit_by_day_dir / "reddit_daily_all.csv"
+        if not reddit_daily_path.exists():
+            out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
+            pd.DataFrame([]).to_csv(out_path, index=False)
+            print(f"{Fore.YELLOW}stage 5 - no {reddit_daily_path.name} yet; wrote empty {out_path.name}{Style.RESET_ALL}")
+            return processed_metrics_dir / "merged_features_all.csv"
 
-        # check if reddit daily metrics is empty.
         daily = pd.read_csv(reddit_daily_path)
         if daily.empty:
-            out_path = processed_metrics_dir / f"merged_features_{stem}.csv"
+            out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
             pd.DataFrame([]).to_csv(out_path, index=False)
-            return out_path
+            return processed_metrics_dir / "merged_features_all.csv"
 
-        # unify date key.
+        # normalize date key (master table uses "date"; legacy per-run files used "created_date").
         daily = daily.copy()
         daily["ticker"] = daily["ticker"].astype(str)
-        daily["date"] = daily["created_date"].astype(str)
-        daily = daily.drop(columns=[c for c in ["created_date"] if c in daily.columns])
+        if "date" in daily.columns:
+            daily["date"] = daily["date"].astype(str)
+        elif "created_date" in daily.columns:
+            daily["date"] = daily["created_date"].astype(str)
+            daily = daily.drop(columns=["created_date"], errors="ignore")
+        else:
+            print(f"{Fore.RED}stage 5 - reddit daily missing date/created_date column{Style.RESET_ALL}")
+            out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
+            pd.DataFrame([]).to_csv(out_path, index=False)
+            return processed_metrics_dir / "merged_features_all.csv"
 
-        # build from specific tickers (stage 3 watchlist).
+        stocks_dir = Path(stocks_by_ticker_dir)
+        have_stocks = set()
+        for p in stocks_dir.glob("raw_*.csv"):
+            stem = p.stem
+            have_stocks.add(stem[4:] if stem.startswith("raw_") else stem)
+        daily = daily[daily["ticker"].isin(have_stocks)].copy()
+        if daily.empty:
+            out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
+            pd.DataFrame([]).to_csv(out_path, index=False)
+            print(f"{Fore.YELLOW}stage 5 - no overlap between reddit tickers and stock files under {stocks_dir}{Style.RESET_ALL}")
+            return processed_metrics_dir / "merged_features_all.csv"
+
+        # optional: restrict to an explicit ticker list (e.g. tonight's watchlist only).
         if tickers:
             want = {str(t) for t in tickers if t is not None}
             daily = daily[daily["ticker"].isin(want)].copy()
 
         # optional: merge stocktwits daily (if exists) onto the reddit daily table.
-        st_path = processed_stocktwits_by_day_dir / f"stocktwits_ticker_daily_{stem}.csv"
+        st_path = processed_stocktwits_by_day_dir / f"stocktwits_ticker_daily_{run_id}.csv"
         if st_path.exists():
             st = pd.read_csv(st_path)
             if not st.empty:
@@ -109,10 +138,9 @@ class FeatureBuilder:
 
         # check if there are any stock rows.
         if not stock_rows:
-            # create an empty dataframe and save it.
-            out_path = processed_metrics_dir / f"merged_features_{stem}.csv"
+            out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
             pd.DataFrame([]).to_csv(out_path, index=False)
-            return out_path
+            return processed_metrics_dir / "merged_features_all.csv"
 
         # concat the stock rows into a single dataframe.
         stocks = pd.concat(stock_rows, ignore_index=True)
@@ -124,12 +152,27 @@ class FeatureBuilder:
         merged["date"] = pd.to_datetime(merged["date"], errors="coerce")
         merged = merged.sort_values(["ticker", "date"]).reset_index(drop=True)
 
+        # --- had_reddit: 1 = reddit daily row has real mention activity for this ticker-day, 0 = missing or zero mentions.
+        # inner join already guarantees a reddit row; we still set this from mention_count so later outer joins stay consistent.
+        if "mention_count" in merged.columns:
+            mc = pd.to_numeric(merged["mention_count"], errors="coerce").fillna(0)
+            merged["had_reddit"] = (mc >= 1).astype(np.int8)
+        else:
+            merged["had_reddit"] = np.int8(1)
+
+        n_no = int((merged["had_reddit"] == 0).sum())
+        if n_no:
+            print(
+                f"{Fore.CYAN}stage 5 - had_reddit=0 (no mention_count): {n_no} rows{Style.RESET_ALL}"
+            )
+
         # --- minimal feature set (computed from <= current day D, label uses D+1) ---
         # keep it small until we see backtest results.
         #   - weighted_sentiment: direction
         #   - buzz: log1p(total_engagement) (attention)
         #   - sentiment_chg_1d: sentiment acceleration
-        #   - close_ret_3d: simple trend context 
+        #   - close_ret_3d: simple trend context
+        #   - had_reddit: coverage flag (milestone A)
 
         for col in ["weighted_sentiment", "total_engagement", "close_ret_3d", "y_ret_1d"]:
             if col in merged.columns:
@@ -138,38 +181,60 @@ class FeatureBuilder:
         merged["buzz"] = np.log1p(merged.get("total_engagement", 0).fillna(0))
         merged["sentiment_chg_1d"] = merged.get("weighted_sentiment") - merged.groupby("ticker")["weighted_sentiment"].shift(1)
 
+        # --- milestone B: per-ticker lags + rolling means (rows already sorted by ticker, date).
+        # rolling window includes day D and earlier rows for that ticker only — no future dates.
+        _tg = merged["ticker"]
+        merged["weighted_sentiment_lag1"] = merged.groupby(_tg, sort=False)["weighted_sentiment"].shift(1)
+        merged["buzz_lag1"] = merged.groupby(_tg, sort=False)["buzz"].shift(1)
+        merged["weighted_sentiment_roll3_mean"] = merged.groupby(_tg, sort=False)["weighted_sentiment"].transform(
+            lambda s: s.rolling(3, min_periods=1).mean()
+        )
+        merged["weighted_sentiment_roll5_mean"] = merged.groupby(_tg, sort=False)["weighted_sentiment"].transform(
+            lambda s: s.rolling(5, min_periods=1).mean()
+        )
+
+        # --- milestone C': day-over-day change in buzz (log1p engagement), not redundant with sentiment_chg_1d.
+        merged["buzz_dod"] = merged["buzz"] - merged["buzz_lag1"]
+
         # write the merged dataframe to a csv file.
         merged["date"] = merged["date"].dt.date.astype(str)
-        out_cols = ["ticker", "date", "weighted_sentiment", "buzz", "sentiment_chg_1d", "close_ret_3d", "y_ret_1d"]
+        out_cols = [
+            "ticker",
+            "date",
+            "weighted_sentiment",
+            "buzz",
+            "sentiment_chg_1d",
+            "weighted_sentiment_lag1",
+            "buzz_lag1",
+            "buzz_dod",
+            "weighted_sentiment_roll3_mean",
+            "weighted_sentiment_roll5_mean",
+            "had_reddit",
+            "close_ret_3d",
+            "y_ret_1d",
+        ]
         merged = merged[[c for c in out_cols if c in merged.columns]].copy()
-        out_path = processed_metrics_dir / f"merged_features_{stem}.csv"
-        merged.to_csv(out_path, index=False)
+        run_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
+        merged.to_csv(run_path, index=False)
 
-        # --- stack/aggregate across runs (training uses all history) ---
+        # full recompute from master reddit × all on-disk stock files (single source of truth).
         master_path = processed_metrics_dir / "merged_features_all.csv"
-        if master_path.exists():
-            old = pd.read_csv(master_path)
-            combined = pd.concat([old, merged], ignore_index=True)
-        else:
-            combined = merged.copy()
-
-        # dedupe by ticker+date (keep latest run's row if duplicated).
+        combined = merged.copy()
         combined["ticker"] = combined["ticker"].astype(str)
         combined["date"] = combined["date"].astype(str)
         combined = combined.drop_duplicates(subset=["ticker", "date"], keep="last").sort_values(["date", "ticker"])
         combined.to_csv(master_path, index=False)
 
-        # print a warning if there are any missing stock files.
         if missing:
             print(
-                f"{Fore.YELLOW}stage 4 - missing stock files for {len(missing)} tickers (skipped):{Style.RESET_ALL} "
+                f"{Fore.YELLOW}stage 5 - missing stock files for {len(missing)} tickers (skipped):{Style.RESET_ALL} "
                 + ", ".join(missing[:10])
                 + (" ..." if len(missing) > 10 else "")
             )
 
         print(
-            f"{Fore.CYAN}stage 4 - saved merged dataset to: {Style.RESET_ALL}{out_path.name} "
-            f"{Fore.CYAN}(stacked to {Style.RESET_ALL}{master_path.name}{Fore.CYAN}){Style.RESET_ALL}"
+            f"{Fore.CYAN}stage 5 - saved merged dataset to: {Style.RESET_ALL}{run_path.name} "
+            f"{Fore.CYAN}({len(combined):,} rows in {Path(master_path).name}){Style.RESET_ALL}"
         )
         return master_path
 

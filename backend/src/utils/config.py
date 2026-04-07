@@ -144,3 +144,10 @@ lookback_days = 90
 # how much history to use when training from merged_features_all.csv
 # (keeps training time bounded as the dataset grows)
 train_lookback_days = 365
+
+# sklearn logistic C (l2 strength). lower = more shrink; try 0.25–0.5 if many correlated features overfit.
+logistic_l2_c = 1.0
+
+# after stage 5 (feature merge), run logistic baseline training + write training report.
+# set False for ingest-only runs if sklearn step is slow or unnecessary.
+run_baseline_training_after_merge = True
