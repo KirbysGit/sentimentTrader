@@ -178,15 +178,18 @@ def main():
     df_new = orchestrator.collect_reddit_data()
     df_refresh = orchestrator.reddit_collector.refresh_recent_posts(days=7)
 
-    # Combine "new" + "refreshed" and keep the snapshot with the highest engagement per post id.
+    # combine new & refreshed reddit data.
     frames = [x for x in [df_new, df_refresh] if x is not None and not x.empty]
+    
     df = pd.concat(frames, ignore_index=True) if frames else None
     if df is not None and not df.empty:
         try:
+            # -- convert the score and num_comments to numeric.
             df["score"] = pd.to_numeric(df.get("score", 0), errors="coerce").fillna(0)
             df["num_comments"] = pd.to_numeric(df.get("num_comments", 0), errors="coerce").fillna(0)
             df["_engagement"] = df["score"] + (df["num_comments"] * float(comment_weight))
-            # Keep highest engagement per post id
+            
+            # -- keep highest engagement per post id.
             df = (
                 df.sort_values(["id", "_engagement"])
                 .drop_duplicates(subset=["id"], keep="last")
@@ -201,7 +204,9 @@ def main():
         print(f"{Fore.YELLOW}=== no new reddit data collected. stopping pipeline (try again later). ===\n\n{Style.RESET_ALL}")
         print(f"{Fore.RED}=== FAIL stage 1 failed! ===\n{Style.RESET_ALL}")
         return
-
+    
+    # -----
+    
     # phase 2 : process reddit data.
     tickers = orchestrator.process_social_data(df=df)
     if tickers:

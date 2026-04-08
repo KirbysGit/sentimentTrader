@@ -282,15 +282,18 @@ class RedditCollector:
         Source of truth for which post_ids to refresh is the processed master table `posts_all.csv`.
         This does NOT touch the incremental cursor (last_seen_created_utc).
         """
+        # -- 1. get the path to the processed reddit by day directory.
         try:
             from src.utils.path_config import processed_reddit_by_day_dir
         except Exception:
             return pd.DataFrame()
 
+        # -- 2. get the path to the master posts file.
         master_posts_path = processed_reddit_by_day_dir / "posts_all.csv"
         if not master_posts_path.exists():
             return pd.DataFrame()
 
+        # -- 3. read the master posts file.
         try:
             old = pd.read_csv(master_posts_path)
         except Exception:
@@ -299,7 +302,7 @@ class RedditCollector:
         if old is None or old.empty:
             return pd.DataFrame()
 
-        # Identify last N days by created_at (UTC).
+        # -- 4. identify last N days by created_at (UTC).
         cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
         created = pd.to_datetime(old.get("created_at", None), utc=True, errors="coerce")
         old = old.assign(_created_at=created)

@@ -377,8 +377,8 @@ class RedditProcessor(Booster):
         posts_path = processed_reddit_by_day_dir / f"posts_{run_id}.csv"
         self.posts_df.to_csv(posts_path, index=False)
 
-        # Update master posts table (append + dedupe by post_id, keeping highest engagement snapshot).
-        # This powers "refresh last N days" so daily aggregates can be corrected as posts gain traction.
+        # update master posts table (append + dedupe by post_id, keeping highest engagement snapshot).
+        # this powers "refresh last N days" so daily aggregates can be corrected as posts gain traction.
         posts_master_path = processed_reddit_by_day_dir / "posts_all.csv"
         try:
             if posts_master_path.exists():
@@ -387,7 +387,7 @@ class RedditProcessor(Booster):
             else:
                 combined_posts = self.posts_df.copy()
 
-            # Normalize types + compute engagement defensively.
+            # normalize types + compute engagement defensively.
             combined_posts["post_id"] = combined_posts.get("post_id", "").astype(str)
             combined_posts["created_at"] = combined_posts.get("created_at", "").astype(str)
             combined_posts["score"] = pd.to_numeric(combined_posts.get("score", 0), errors="coerce").fillna(0)
@@ -395,18 +395,18 @@ class RedditProcessor(Booster):
             combined_posts["engagement"] = (
                 pd.to_numeric(combined_posts.get("engagement", 0), errors="coerce").fillna(0)
             )
-            # Prefer recomputing engagement from score/comments if engagement is missing/zero.
+            # prefer recomputing engagement from score/comments if engagement is missing/zero.
             recomputed = combined_posts["score"] + (combined_posts["num_comments"] * float(comment_weight))
             combined_posts["engagement"] = combined_posts["engagement"].where(combined_posts["engagement"] > 0, recomputed)
 
-            # Keep the snapshot with the highest engagement for each post.
+            # keep the snapshot with the highest engagement for each post.
             combined_posts = combined_posts.sort_values(["post_id", "engagement"]).drop_duplicates(
                 subset=["post_id"], keep="last"
             )
             combined_posts = combined_posts.reset_index(drop=True)
             combined_posts.to_csv(posts_master_path, index=False)
         except Exception:
-            # non-fatal
+            # non-fatal : don't break the pipeline if the master file is locked/corrupt
             pass
 
         # --- output 2: quantitative df (post_id+ticker metrics) ---

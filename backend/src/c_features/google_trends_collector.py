@@ -37,10 +37,15 @@ class GoogleTrendsCollector:
 
     def __init__(self, geo: str = "US", timeframe: str = "now 7-d", max_retries: int = 5, base_delay_s: float = 3.0, verbose: bool = False,):
         
+        # -- 1. set the geo and timeframe.
         self.geo = geo
         self.timeframe = timeframe
+
+        # -- 2. set the max retries and base delay.
         self.max_retries = int(max_retries)
         self.base_delay_s = float(base_delay_s)
+
+        # -- 3. set the verbose flag.
         self.verbose = bool(verbose)
 
         # pytrends currently emits a noisy pandas FutureWarning inside its own internals.
@@ -164,6 +169,7 @@ class GoogleTrendsCollector:
 
                 df = df.reset_index().rename(columns={"date": "date"})
 
+                # -- 5. iterate through the batch and add the data to the rows list.
                 for ticker, term in batch:
                     if term not in df.columns:
                         continue
@@ -237,7 +243,9 @@ class GoogleTrendsCollector:
                 if self.verbose:
                     logger.warning(f"[trends] failed to update master table: {e}")
 
+            # -- 6. return the results as a TrendsResult object.
             return TrendsResult(ok=True, path=str(out_path), rows=int(len(daily)))
         except Exception as e:
+            # -- 7. return the results as a TrendsResult object with the error.
             return TrendsResult(ok=False, path=None, rows=0, error=str(e))
 

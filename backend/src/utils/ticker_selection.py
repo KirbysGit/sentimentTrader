@@ -7,7 +7,7 @@ from colorama import Fore, Style
 
 # local imports.
 from src.utils.path_config import processed_reddit_by_day_dir
-from src.utils.config import topN, min_mentions, min_engagement
+from src.utils.config import topN
 
 def grab_top_tickers(processed: pd.DataFrame, run_id: str) -> List[str]:
 
@@ -36,11 +36,9 @@ def grab_top_tickers(processed: pd.DataFrame, run_id: str) -> List[str]:
     # -- 5. keep everything with at least 1 mention (no hard engagement gate yet).
     filtered = agg[agg["mention_count"] >= 1].copy()
 
-    # -- 6. calculate trend strength and filter by engagement.
+    # -- 6. rank by trend strength (boost × sqrt engagement scale).
     filtered["trend_strength"] = filtered["boost_score_sum"] * (filtered["total_engagement"] + 1) ** 0.5
-    filtered["meets_min_engagement"] = (filtered["total_engagement"] >= min_engagement).astype(int)
-    filtered["rank_score"] = filtered["trend_strength"] + (filtered["meets_min_engagement"] * 0.01)
-    top = filtered.sort_values("rank_score", ascending=False).head(topN)
+    top = filtered.sort_values("trend_strength", ascending=False).head(topN)
 
     # -- 7. write watchlist csv for stage 3 handoff.
     processed_reddit_by_day_dir.mkdir(parents=True, exist_ok=True)
