@@ -454,3 +454,49 @@ it works in this order :
 - then return the by_ticker_dir path to be used for the next step.
 
 ---
+
+## step 5 - `e_merge` - merge the reddit data w/ the stock data.
+
+---
+
+### step 5.1 - `build_dataset` - builds our merged dataset.
+
+---
+
+we accept the following arguments :
+
+    ```
+    stocks_by_ticker_dir  ->  directory of the stock data.
+    run_id                ->  id of the run.
+    tickers               ->  list of tickers to merge.
+    ```
+
+it works in this order :
+- set up directory for merged features.
+- read the reddit daily all file.
+- read the stock files and set up each row like this :
+```
+ticker          ->      ticker symbol
+date            ->      date of the data
+close           ->      close price of the stock
+close_ret_3d    ->      3 day return of the stock
+y_ret_1d        ->      1 day return of the stock
+```
+- concatenate the rows to a df.
+- merge reddit daily with daily stock df, where we only keep the days where we have both sentiment + ohlcv.
+- introduce some more features like `buzz`, `sentiment_chg_1d`, to our merged df.
+- write the merged df to a csv with these columns :
+```
+ticker                          ->      ticker symbol
+date                            ->      date of the data
+weighted_sentiment              ->      weighted sentiment
+buzz                            ->      log1p(total_engagement) (attention)
+sentiment_chg_1d                ->      sentiment acceleration
+weighted_sentiment_lag1         ->      weighted sentiment lag1
+buzz_lag1                       ->      buzz lag1
+buzz_dod                        ->      day-over-day change in buzz
+weighted_sentiment_roll3_mean   ->      3 day rolling mean of weighted sentiment
+weighted_sentiment_roll5_mean   ->      5 day rolling mean of weighted sentiment
+had_reddit                      ->      1 if mention_count >= 1, 0 otherwise
+```
+- return the path to the merged features csv.

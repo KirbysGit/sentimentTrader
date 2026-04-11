@@ -27,6 +27,7 @@ from src.utils.config import run_baseline_training_after_merge  # noqa: E402
 from src.utils.path_config import raw_stocks_dir  # noqa: E402
 
 
+# grabs the tickers from our existing stock files.
 def _tickers_from_existing_stock_files() -> list[str]:
     by_ticker = raw_stocks_dir / "by_ticker"
     out: list[str] = []

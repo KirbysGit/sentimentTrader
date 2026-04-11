@@ -35,6 +35,8 @@ class FeatureBuilder:
         # create directory for merged features.
         processed_metrics_dir.mkdir(parents=True, exist_ok=True)
 
+
+        # read the reddit daily all file.
         reddit_daily_path = processed_reddit_by_day_dir / "reddit_daily_all.csv"
         if not reddit_daily_path.exists():
             out_path = processed_metrics_dir / f"merged_features_{run_id}.csv"
@@ -62,6 +64,7 @@ class FeatureBuilder:
             pd.DataFrame([]).to_csv(out_path, index=False)
             return processed_metrics_dir / "merged_features_all.csv"
 
+        # read the stock files.
         stocks_dir = Path(stocks_by_ticker_dir)
         have_stocks = set()
         for p in stocks_dir.glob("raw_*.csv"):
@@ -75,25 +78,13 @@ class FeatureBuilder:
             return processed_metrics_dir / "merged_features_all.csv"
 
         # optional: restrict to an explicit ticker list (e.g. tonight's watchlist only).
+        # w/ our run_pipeline_tail.py script, we don't pass any tickers so this isn't used.
         if tickers:
             want = {str(t) for t in tickers if t is not None}
             daily = daily[daily["ticker"].isin(want)].copy()
 
-        # optional: merge stocktwits daily (if exists) onto the reddit daily table.
-        st_path = processed_stocktwits_by_day_dir / f"stocktwits_ticker_daily_{run_id}.csv"
-        if st_path.exists():
-            st = pd.read_csv(st_path)
-            if not st.empty:
-                st["ticker"] = st["ticker"].astype(str)
-                st["date"] = st["date"].astype(str)
-                keep = ["ticker", "date", "st_mention_count", "st_total_likes", "st_weighted_sentiment"]
-                st = st[[c for c in keep if c in st.columns]].copy()
-                daily = daily.merge(st, on=["ticker", "date"], how="left")
-                for c in ["st_mention_count", "st_total_likes", "st_weighted_sentiment"]:
-                    if c in daily.columns:
-                        daily[c] = pd.to_numeric(daily[c], errors="coerce").fillna(0)
 
-        # load stock rows for tickers (long format).
+        # initialize stock rows.
         stock_rows = []
         missing = []
 
